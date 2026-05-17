@@ -31,46 +31,87 @@ def _append_query_param(url: str, key: str, value: str) -> str:
     return urlunparse(p._replace(query=new_query))
 
 
-def _rewrite_supabase_direct_to_pooler(url: str) -> str:
-    """
-    Render n'a souvent pas d'IPv6 : db.xxx.supabase.co:5432 echoue (Network unreachable).
-    Utilise le pooler Supabase (port 6543, IPv4) — region EU par defaut (Frankfurt).
-    """
+def _project_ref_from_host(host: str) -> str:
+    h = host.lower()
+    if h.startswith("db.") and h.endswith(".supabase.co"):
+        return h[3 : -len(".supabase.co")]
+    return ""
+
+
+def _ensure_pooler_username(url: str) -> str:
+    """Sur le pooler Supabase, l'utilisateur doit etre postgres.<project_ref>."""
+    p = urlparse(url)
+    host = (p.hostname or "").lower()
+    ref = os.environ.get("SUPABASE_PROJECT_REF", "").strip() or _project_ref_from_host(host)
+    if not ref:
+        return url
+    user = unquote(p.username or "")
+    want = f"postgres.{ref}"
+    if user == want:
+        return url
+    if user == "postgres" or (user.startswith("postgres.") and user != want):
+        password = unquote(p.password or "")
+        auth = quote(want, safe="")
+        if password:
+            auth += ":" + quote(password, safe="")
+        hostpart = p.hostname or ""
+        if p.port:
+            hostpart = f"{hostpart}:{p.port}"
+        netloc = f"{auth}@{hostpart}"
+        out = urlunparse(p._replace(netloc=netloc))
+        print(f"[bridge] Supabase: utilisateur -> {want}")
+        return out
+    return url
+
+
+def _rewrite_direct_to_pooler(url: str, pooler_host: str, pooler_port: int) -> str:
+    """Reecrit db.xxx.supabase.co:5432 vers le pooler (IPv4) — host copie depuis Supabase Connect."""
     p = urlparse(url)
     host = (p.hostname or "").lower()
     if "pooler.supabase.com" in host:
-        return url
+        return _ensure_pooler_username(url)
     if not host.startswith("db.") or not host.endswith(".supabase.co"):
         return url
-    if (p.port or 5432) != 5432:
-        return url
 
-    project_ref = host[3 : -len(".supabase.co")]
-    pooler_host = os.environ.get(
-        "SUPABASE_POOLER_HOST", "aws-0-eu-central-1.pooler.supabase.com"
-    ).strip()
+    ref = _project_ref_from_host(host)
     user = unquote(p.username or "postgres")
-    if user == "postgres":
-        user = f"postgres.{project_ref}"
+    if user == "postgres" and ref:
+        user = f"postgres.{ref}"
     password = unquote(p.password or "")
     path = p.path or "/postgres"
 
     auth = quote(user, safe="")
     if password:
         auth += ":" + quote(password, safe="")
-    netloc = f"{auth}@{pooler_host}:6543"
+    netloc = f"{auth}@{pooler_host}:{pooler_port}"
     out = urlunparse(p._replace(netloc=netloc, path=path))
-    print(f"[bridge] Supabase: pooler {pooler_host}:6543 (evite IPv6 direct)")
-    return out
+    print(f"[bridge] Supabase pooler {pooler_host}:{pooler_port}")
+    return _ensure_pooler_username(out)
 
 
 def normalize_database_url(url: str) -> str:
-    """SSL + pooler automatique sur Render pour Supabase."""
+    """
+    SSL obligatoire.
+    Sur Render : ne devine plus la region pooler (aws-0 vs aws-1).
+    - Collez l'URI **Transaction** complete depuis Supabase Connect dans DATABASE_URL, ou
+    - Definissez SUPABASE_POOLER_HOST (ex. aws-1-eu-central-1.pooler.supabase.com) + port 6543.
+    """
     u = url.strip()
     if not u:
         return u
-    if _running_on_render():
-        u = _rewrite_supabase_direct_to_pooler(u)
+    u = _ensure_pooler_username(u)
+
+    if _running_on_render() and "pooler.supabase.com" not in u.lower():
+        pooler_host = os.environ.get("SUPABASE_POOLER_HOST", "").strip()
+        if pooler_host:
+            port = int(os.environ.get("SUPABASE_POOLER_PORT", "6543"))
+            u = _rewrite_direct_to_pooler(u, pooler_host, port)
+        else:
+            print(
+                "[bridge] Render + Supabase: copiez l'URI pooler (Transaction, port 6543) "
+                "dans DATABASE_URL, ou definissez SUPABASE_POOLER_HOST depuis Supabase Connect."
+            )
+
     if "sslmode=" not in u.lower():
         u = _append_query_param(u, "sslmode", "require")
     return u

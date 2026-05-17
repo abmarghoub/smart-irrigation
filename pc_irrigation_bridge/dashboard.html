@@ -188,18 +188,27 @@ async function poll(){
 document.getElementById("f").onsubmit=async (e)=>{
   e.preventDefault();
   const msg=document.getElementById("msg");
+  const age=document.getElementById("crop_age_days").value;
+  const ci=document.getElementById("crop_idx").value;
+  const si=document.getElementById("soil_idx").value;
+  if(!age||ci===""||si===""){
+    msg.textContent="Remplissez age, culture et sol avant Appliquer.";
+    return;
+  }
   msg.textContent="Envoi MQTT…";
-  const body=new URLSearchParams({
-    crop_age_days:document.getElementById("crop_age_days").value,
-    crop_idx:document.getElementById("crop_idx").value,
-    soil_idx:document.getElementById("soil_idx").value
-  });
+  const body=new URLSearchParams({crop_age_days:age,crop_idx:ci,soil_idx:si});
   try{
     const r=await fetch(window.location.origin+"/api/manual",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
     const t=await r.json();
-    msg.textContent=r.ok&&(t&&t.ok)?"Commande MQTT envoyee":"Erreur "+r.status+": "+JSON.stringify(t);
+    if(r.ok&&t&&t.ok){
+      msg.textContent="Commande envoyee sur "+(t.topic||"MQTT")+" — attendez ~5 s (ESP).";
+      setTimeout(poll,1500);
+      setTimeout(poll,5000);
+    }else{
+      msg.textContent="Echec: "+(t&&t.error?t.error:JSON.stringify(t));
+    }
     poll();
-  }catch(err){msg.textContent="Erreur reseau";}
+  }catch(err){msg.textContent="Erreur reseau: "+(err&&err.message?err.message:String(err));}
 };
 document.getElementById("btn_dl_csv").onclick=async function(){
   const msg=document.getElementById("csv_dl_msg");

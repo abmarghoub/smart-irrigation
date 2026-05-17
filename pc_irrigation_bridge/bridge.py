@@ -411,6 +411,8 @@ def api_health() -> Any:
                 "DEVICE_ID": _env("DEVICE_ID", "station01"),
             },
             "mqtt_target": f"{ns.mqtt_host}:{ns.mqtt_port}" if ns else "",
+            "topic_telemetry": ns.topic_telemetry if ns else "",
+            "topic_command": ns.topic_command if ns else "",
             "notes": _bootstrap_notes[-5:],
         }
     )
@@ -420,12 +422,29 @@ def api_health() -> Any:
 def api_manual() -> Any:
     if not _mqtt_client or not _args_ns:
         return jsonify({"ok": False, "error": "MQTT non initialise"}), 503
-    age = int(request.form.get("crop_age_days", 0))
-    ci = int(request.form.get("crop_idx", 0))
-    si = int(request.form.get("soil_idx", 0))
+    try:
+        age = int(request.form.get("crop_age_days", 0))
+        ci = int(request.form.get("crop_idx", ""))
+        si = int(request.form.get("soil_idx", ""))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Champs invalides (age, culture, sol)"}), 400
+    if age < 1 or age > 120:
+        return jsonify({"ok": False, "error": "age doit etre entre 1 et 120"}), 400
+    if ci < 0 or ci > 3 or si < 0 or si > 3:
+        return jsonify({"ok": False, "error": "culture et sol : indices 0-3"}), 400
     body = json.dumps({"crop_age_days": age, "crop_idx": ci, "soil_idx": si})
-    ok = _mqtt_client.publish(_args_ns.topic_command, body, qos=1).rc == 0
-    return jsonify({"ok": bool(ok)})
+    topic = _args_ns.topic_command
+    info = _mqtt_client.publish(topic, body, qos=1)
+    ok = info.rc == mqtt.MQTT_ERR_SUCCESS
+    print(f"[bridge] publish manuel topic={topic!r} rc={info.rc} payload={body}")
+    return jsonify(
+        {
+            "ok": bool(ok),
+            "topic": topic,
+            "payload": json.loads(body),
+            "mqtt_rc": int(info.rc),
+        }
+    )
 
 
 def main() -> None:

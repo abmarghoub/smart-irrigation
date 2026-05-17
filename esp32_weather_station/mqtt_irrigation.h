@@ -8,6 +8,8 @@
 
 void mqtt_irrigation_begin();
 void mqtt_irrigation_loop();
+/** Force le prochain tour capteurs/MQTT (apres commande manuelle distante). */
+void irrigation_request_sensor_cycle();
 void mqtt_irrigation_publish_state(
     uint32_t uptime_s,
     bool wifi_ok,
@@ -40,6 +42,7 @@ void mqtt_irrigation_publish_state(
 
 inline void mqtt_irrigation_begin() {}
 inline void mqtt_irrigation_loop() {}
+inline void irrigation_request_sensor_cycle() {}
 inline void mqtt_irrigation_publish_state(
     uint32_t, bool, const char*, float, float, float, float, float, float, float, float, bool, const float*, int, int, int,
     bool, float, bool, bool, int, float, float, bool, float, float) {}

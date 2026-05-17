@@ -4,7 +4,9 @@
 
 | Variable | Exemple |
 |----------|---------|
-| `DATABASE_URL` | URI Supabase (directe `db.xxx...:5432` OK : le pont bascule auto sur le **pooler** `:6543` sur Render) |
+| `DATABASE_URL` | URI **Transaction pooler** copiee depuis Supabase **Connect** (port **6543**, user `postgres.hofilrtzkkpexdxshkoo`) |
+| `SUPABASE_POOLER_HOST` | (Option) Hote pooler exact si vous gardez l'URI directe `db.xxx:5432` — ex. `aws-1-eu-central-1.pooler.supabase.com` |
+| `SUPABASE_POOLER_PORT` | (Option) `6543` (Transaction) ou `5432` (Session) |
 | `MQTT_HOST` | `d5d4693246d54f46a43cefa118dea176.s1.eu.hivemq.cloud` |
 | `MQTT_PORT` | `8883` |
 | `MQTT_USER` | `irrigation_station01` |

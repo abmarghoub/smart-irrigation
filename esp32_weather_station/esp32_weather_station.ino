@@ -100,6 +100,10 @@ static IrrigationDoseState g_dose{false, 0.f, 0.f, 0};
 // Intervalle capteurs / decision / publication (meme cadence qu’avec l’ancien dashboard web)
 static uint32_t g_last_sensor_cycle_ms = 0;
 
+void irrigation_request_sensor_cycle() {
+  g_last_sensor_cycle_ms = 0;
+}
+
 #if ENABLE_WEB_DASHBOARD
 static WebServer g_web(DASHBOARD_PORT);
 

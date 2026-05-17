@@ -55,6 +55,19 @@ static void mqtt_on_message(char* topic, byte* payload, unsigned int length) {
   g_soil_idx = si;
   g_manual_ready = true;
   Serial.println(F("[MQTT] Saisie manuelle appliquee (topic commande)."));
+  Serial.print(F("  age_jours="));
+  Serial.println(g_crop_age_days);
+  Serial.print(F("  culture="));
+  Serial.print(kCropNames[g_crop_idx]);
+  Serial.print(F(" (idx="));
+  Serial.print(g_crop_idx);
+  Serial.println(F(")"));
+  Serial.print(F("  sol="));
+  Serial.print(kSoilNames[g_soil_idx]);
+  Serial.print(F(" (idx="));
+  Serial.print(g_soil_idx);
+  Serial.println(F(")"));
+  irrigation_request_sensor_cycle();
 }
 
 static void mqtt_print_rc_hint(int rc) {
