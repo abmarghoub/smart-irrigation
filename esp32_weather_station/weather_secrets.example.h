@@ -1,8 +1,10 @@
-﻿#ifndef WEATHER_SECRETS_H
+#ifndef WEATHER_SECRETS_H
 #define WEATHER_SECRETS_H
 
-#define WIFI_SSID "Ab_mb"
-#define WIFI_PASSWORD "1234567890"
+// Copiez ce fichier vers weather_secrets.h (non versionne) et remplissez vos valeurs.
+
+#define WIFI_SSID "TON_WIFI"
+#define WIFI_PASSWORD "TON_MOT_DE_PASSE_WIFI"
 
 #define WEATHER_HAS_FIXED_GEO 0
 #define WEATHER_FIXED_LAT 0.0f
@@ -29,6 +31,7 @@
 #define ENABLE_MQTT 1
 #endif
 
+// HiveMQ Cloud (TLS port 8883)
 #ifndef MQTT_BROKER_HOST
 #define MQTT_BROKER_HOST "d5d4693246d54f46a43cefa118dea176.s1.eu.hivemq.cloud"
 #endif
@@ -54,7 +57,7 @@
 #define MQTT_USER "irrigation_station01"
 #endif
 #ifndef MQTT_PASSWORD
-#define MQTT_PASSWORD "REMPLACER_PAR_MOT_DE_PASSE_HIVEMQ"
+#define MQTT_PASSWORD "TON_MOT_DE_PASSE_HIVEMQ"
 #endif
 
 #endif

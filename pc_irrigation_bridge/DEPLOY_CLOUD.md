@@ -1,0 +1,63 @@
+# Deploiement cloud (gratuit) — HiveMQ + Render + Supabase
+
+## 1. Variables Render (Environment)
+
+| Variable | Exemple |
+|----------|---------|
+| `DATABASE_URL` | `postgresql://postgres:123am%23@db.xxx.supabase.co:5432/postgres` |
+| `MQTT_HOST` | `d5d4693246d54f46a43cefa118dea176.s1.eu.hivemq.cloud` |
+| `MQTT_PORT` | `8883` |
+| `MQTT_USER` | `irrigation_station01` |
+| `MQTT_PASSWORD` | *(mot de passe HiveMQ)* |
+| `MQTT_TOPIC_TELEMETRY` | `irrigation/station01/telemetry` |
+| `MQTT_TOPIC_COMMAND` | `irrigation/station01/command/manual` |
+| `DEVICE_ID` | `station01` |
+
+Mot de passe Supabase avec `#` → encoder en `%23` dans l'URI.
+
+## 2. Render — Web Service
+
+- **Root Directory** : `pc_irrigation_bridge`
+- **Build** : `pip install -r requirements.txt`
+- **Start** : `gunicorn bridge:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120`
+
+Ou lier le depot et utiliser `render.yaml` a la racine.
+
+## 3. Git push
+
+```powershell
+cd "C:\Users\LENEVO\Desktop\11master pf"
+git add .
+git status
+git commit -m "Cloud: HiveMQ TLS, Supabase, Render gunicorn"
+git push
+```
+
+Render redéploie automatiquement.
+
+## 4. ESP32 — weather_secrets.h (local, non commite)
+
+1. Copier `weather_secrets.example.h` → `weather_secrets.h` si besoin.
+2. Renseigner `WIFI_SSID`, `WIFI_PASSWORD`, `MQTT_PASSWORD` (HiveMQ).
+3. Verifier host, port `8883`, topics `irrigation/station01/...`.
+4. Flasher l'ESP (Arduino IDE).
+
+Moniteur serie attendu : `WiFi OK`, `[MQTT] Connexion ... (TLS)`, pas d'echec `rc=-2`.
+
+## 5. Tests
+
+1. `https://VOTRE-APP.onrender.com/api/health` → `"postgres": true`, `"mqtt": true`
+2. Dashboard `/` → donnees capteurs apres ~30 s
+3. `/api/irrigation_log.csv` → journal CSV depuis Supabase
+4. Telephone en **4G** (WiFi coupe) → meme URL
+
+Premier acces apres inactivite : Render free peut mettre ~1 min a demarrer.
+
+## 6. Depannage
+
+| Probleme | Piste |
+|----------|--------|
+| MQTT `rc=-2` (ESP) | WiFi sans Internet, mauvais host/port, ou auth |
+| `postgres: false` | `DATABASE_URL` invalide (encoder `#` en `%23`) |
+| Dashboard vide | ESP non connecte ou topics differents Render/ESP |
+| CSV vide | Attendre des messages MQTT avec saisie manuelle confirmee |

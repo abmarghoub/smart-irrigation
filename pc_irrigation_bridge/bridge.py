@@ -1,42 +1,30 @@
 """
-Pont PC : souscrit aux messages MQTT de l'ESP32, enregistre le CSV sur disque,
-optionnellement MySQL, sert le dashboard local (Flask) et relaie la saisie manuelle vers l'ESP32.
+Pont : MQTT (HiveMQ Cloud) -> Supabase/Postgres + export CSV, dashboard Flask.
 
-Le journal CSV ne contient que :
-  - saisie manuelle (culture, sol, age) ;
-  - grandeurs mesurees (temperature, humidite air, pluie station, vent, humidite sol), valeurs avec 2 decimales ;
-  - sorties du modele (p_fraction, irrigate, irrigation_litres) — volume en litres, 2 decimales.
-
-MySQL : meme jeu de champs (+ id, recorded_at). La base indiquee est creee automatiquement si le compte a le droit CREATE.
-Variables d'environnement MYSQL_* ou options en ligne de commande.
-
-Prérequis : broker MQTT (ex. Mosquitto) sur le PC ou le LAN.
-
-Usage :
-  cd pc_irrigation_bridge
-  pip install -r requirements.txt
-  python bridge.py --mqtt-host 127.0.0.1 --http-port 8765
-  python bridge.py --reset-csv
-  python bridge.py --no-mysql   # CSV uniquement
+Variables d'environnement (Render) :
+  DATABASE_URL, MQTT_HOST, MQTT_PORT, MQTT_USER, MQTT_PASSWORD,
+  MQTT_TOPIC_TELEMETRY, MQTT_TOPIC_COMMAND, DEVICE_ID, PORT
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import os
+import ssl
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, Response, jsonify, request, send_file
+from flask import Flask, Response, jsonify, request
 import paho.mqtt.client as mqtt
 
 from db_mysql import MySQLStore, TelemetryData, extract_telemetry_from_mqtt, telemetry_to_csv_row
+from db_postgres import PostgresStore, postgres_store_from_env
 
-# Colonnes utiles uniquement (pas de champs sans capteur / sans saisie / sans inference).
 CSV_HEADER = [
     "crop_name",
     "soil_type",
@@ -58,7 +46,70 @@ _last_state: dict[str, Any] = {}
 
 _mqtt_client: mqtt.Client | None = None
 _args_ns: argparse.Namespace | None = None
+_pg_store: PostgresStore | None = None
 _mysql_store: MySQLStore | None = None
+_bootstrap_lock = threading.Lock()
+_bootstrapped = False
+
+
+def _env(key: str, default: str = "") -> str:
+    return os.environ.get(key, default).strip()
+
+
+def _env_int(key: str, default: int) -> int:
+    raw = _env(key, "")
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_bool(key: str, default: bool) -> bool:
+    raw = _env(key, "").lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return default
+
+
+def _default_topics(device_id: str) -> tuple[str, str]:
+    d = device_id or "station01"
+    return (f"irrigation/{d}/telemetry", f"irrigation/{d}/command/manual")
+
+
+def build_namespace(argv: list[str] | None = None) -> argparse.Namespace:
+    device_id = _env("DEVICE_ID", "station01")
+    tel_def, cmd_def = _default_topics(device_id)
+    mqtt_port = _env_int("MQTT_PORT", 8883)
+    mqtt_tls = _env_bool("MQTT_TLS", mqtt_port == 8883)
+
+    p = argparse.ArgumentParser(description="Dashboard irrigation via MQTT + Postgres/CSV")
+    p.add_argument("--mqtt-host", default=_env("MQTT_HOST") or _env("MQTT_BROKER_HOST") or "127.0.0.1")
+    p.add_argument("--mqtt-port", type=int, default=mqtt_port)
+    p.add_argument("--mqtt-user", default=_env("MQTT_USER"))
+    p.add_argument("--mqtt-password", default=_env("MQTT_PASSWORD"))
+    p.add_argument("--mqtt-client-id", default=_env("MQTT_CLIENT_ID", "irrigation_pc_bridge"))
+    p.add_argument("--mqtt-tls", action=argparse.BooleanOptionalAction, default=mqtt_tls)
+    p.add_argument("--topic-telemetry", default=_env("MQTT_TOPIC_TELEMETRY", tel_def))
+    p.add_argument("--topic-command", default=_env("MQTT_TOPIC_COMMAND", cmd_def))
+    p.add_argument("--device-id", default=device_id)
+    p.add_argument("--csv-path", default=_env("CSV_PATH", "data/irrigation_log.csv"))
+    p.add_argument("--reset-csv", action="store_true")
+    p.add_argument("--http-host", default=_env("HTTP_HOST", "0.0.0.0"))
+    p.add_argument("--http-port", type=int, default=_env_int("PORT", _env_int("HTTP_PORT", 8765)))
+    p.add_argument("--no-mysql", action="store_true", default=bool(_env("DATABASE_URL")))
+    p.add_argument("--no-postgres", action="store_true")
+    p.add_argument("--pg-table", default=_env("PG_TABLE", "irrigation_telemetry"))
+    p.add_argument("--mysql-host", default=_env("MYSQL_HOST", "127.0.0.1"))
+    p.add_argument("--mysql-port", type=int, default=_env_int("MYSQL_PORT", 3306))
+    p.add_argument("--mysql-user", default=_env("MYSQL_USER", "root"))
+    p.add_argument("--mysql-password", default=_env("MYSQL_PASSWORD", ""))
+    p.add_argument("--mysql-database", default=_env("MYSQL_DATABASE", "irrigation"))
+    p.add_argument("--mysql-table", default=_env("MYSQL_TABLE", "irrigation_telemetry"))
+    return p.parse_args(argv)
 
 
 def _write_header_only(path: Path) -> None:
@@ -76,44 +127,45 @@ def _backup_and_remove(path: Path) -> None:
 
 
 def _ensure_csv_schema(path: Path, *, force_reset: bool, auto_fix_header: bool) -> None:
-    """Cree le fichier avec l'en-tete reduit ; reset ou corrige si mauvais en-tete."""
     if force_reset:
         _backup_and_remove(path)
         _write_header_only(path)
-        print("[bridge] CSV reinitialise (--reset-csv), en-tete journal reduit.")
         return
-
     if not path.is_file() or path.stat().st_size == 0:
         _write_header_only(path)
         return
-
     with path.open("r", encoding="utf-8-sig", newline="") as f:
         first = next(csv.reader(f), None)
     if not first:
         _write_header_only(path)
         return
-
     if [c.strip() for c in first] == CSV_HEADER:
         return
-
     if auto_fix_header:
         _backup_and_remove(path)
         _write_header_only(path)
-        print("[bridge] En-tete CSV obsolete : fichier sauvegarde et reinitialise (colonnes reduites).")
         return
-
-    raise ValueError(
-        f"En-tete CSV inattendu dans {path}. Lancez avec --reset-csv ou supprimez le fichier."
-    )
+    raise ValueError(f"En-tete CSV inattendu dans {path}")
 
 
 def _append_csv_row(path: Path, row: TelemetryData) -> None:
     _ensure_csv_schema(path, force_reset=False, auto_fix_header=True)
     line = telemetry_to_csv_row(row, CSV_HEADER)
-    if len(line) != len(CSV_HEADER):
-        raise RuntimeError("internal: row/columns mismatch")
     with path.open("a", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow(line)
+
+
+def _csv_response_from_rows(rows: list[list[Any]]) -> Response:
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(CSV_HEADER)
+    for line in rows:
+        w.writerow(line)
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=irrigation_log.csv"},
+    )
 
 
 def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> None:
@@ -130,16 +182,22 @@ def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage
 
     row = extract_telemetry_from_mqtt(payload)
 
-    try:
-        _append_csv_row(Path(_args_ns.csv_path), row)
-    except OSError as e:
-        print("[bridge] ecriture CSV:", e)
+    if _pg_store is not None:
+        try:
+            _pg_store.insert(row)
+        except Exception as e:
+            print("[bridge] Postgres insert:", e)
 
     if _mysql_store is not None:
         try:
             _mysql_store.insert(row)
         except Exception as e:
             print("[bridge] MySQL insert:", e)
+
+    try:
+        _append_csv_row(Path(_args_ns.csv_path), row)
+    except OSError as e:
+        print("[bridge] ecriture CSV locale:", e)
 
 
 def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client:
@@ -153,31 +211,87 @@ def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client:
         else:
             print(f"[MQTT] connexion refusee, code {rc}")
 
-    cid = ns.mqtt_client_id + "_bridge"
+    cid = f"{ns.mqtt_client_id}_{int(time.time()) % 100000}"
     client = mqtt.Client(client_id=cid)
     client.on_connect = on_connect
     client.on_message = _on_mqtt_message
     if ns.mqtt_user:
         client.username_pw_set(ns.mqtt_user, ns.mqtt_password or None)
+    if ns.mqtt_tls:
+        client.tls_set(cert_reqs=ssl.CERT_REQUIRED, tls_version=ssl.PROTOCOL_TLS_CLIENT)
     client.connect(ns.mqtt_host, ns.mqtt_port, keepalive=30)
     client.loop_start()
     _mqtt_client = client
     return client
 
 
+def _init_storage(ns: argparse.Namespace) -> None:
+    global _pg_store, _mysql_store
+
+    _pg_store = None
+    if not ns.no_postgres:
+        try:
+            _pg_store = postgres_store_from_env()
+            if _pg_store is not None:
+                _pg_store.ensure_table()
+                print(f"[bridge] Postgres pret : table `{ns.pg_table}` device={ns.device_id!r}")
+        except Exception as e:
+            print("[bridge] Postgres desactive:", e)
+            _pg_store = None
+
+    _mysql_store = None
+    if not ns.no_mysql and _env("MYSQL_HOST"):
+        try:
+            _mysql_store = MySQLStore(
+                host=ns.mysql_host,
+                port=ns.mysql_port,
+                user=ns.mysql_user,
+                password=ns.mysql_password,
+                database=ns.mysql_database,
+                table=ns.mysql_table,
+            )
+            _mysql_store.ensure_table()
+            print(f"[bridge] MySQL pret : `{ns.mysql_database}`.`{ns.mysql_table}`")
+        except Exception as e:
+            print("[bridge] MySQL desactive:", e)
+            _mysql_store = None
+
+    if not _env("DATABASE_URL"):
+        csv_path = Path(ns.csv_path).resolve()
+        print(f"[bridge] CSV local : {csv_path}")
+        _ensure_csv_schema(csv_path, force_reset=ns.reset_csv, auto_fix_header=not ns.reset_csv)
+
+
+def bootstrap(argv: list[str] | None = None) -> argparse.Namespace:
+    global _bootstrapped
+    with _bootstrap_lock:
+        if _bootstrapped and _args_ns is not None:
+            return _args_ns
+        ns = build_namespace(argv)
+        _init_storage(ns)
+        _start_mqtt(ns)
+        _bootstrapped = True
+        return ns
+
+
 @app.route("/api/irrigation_log.csv", methods=["GET"])
 def api_irrigation_log_csv() -> Any:
-    """Telechargement du journal CSV (chemin configure par --csv-path)."""
+    if _pg_store is not None:
+        try:
+            rows = _pg_store.fetch_all_csv_rows(CSV_HEADER)
+            return _csv_response_from_rows(rows)
+        except Exception as e:
+            return jsonify({"error": f"Lecture base: {e}"}), 500
+
     if not _args_ns:
         return jsonify({"error": "Pont non initialise"}), 503
     path = Path(_args_ns.csv_path).resolve()
     if not path.is_file():
         return jsonify({"error": "Fichier CSV introuvable"}), 404
-    return send_file(
-        path,
+    return Response(
+        path.read_text(encoding="utf-8"),
         mimetype="text/csv; charset=utf-8",
-        as_attachment=True,
-        download_name="irrigation_log.csv",
+        headers={"Content-Disposition": "attachment; filename=irrigation_log.csv"},
     )
 
 
@@ -207,6 +321,17 @@ def api_state() -> Any:
         return jsonify(_last_state)
 
 
+@app.route("/api/health", methods=["GET"])
+def api_health() -> Any:
+    mqtt_ok = False
+    if _mqtt_client is not None:
+        try:
+            mqtt_ok = bool(_mqtt_client.is_connected())
+        except Exception:
+            mqtt_ok = False
+    return jsonify({"ok": True, "mqtt": mqtt_ok, "postgres": _pg_store is not None})
+
+
 @app.route("/api/manual", methods=["POST"])
 def api_manual() -> Any:
     if not _mqtt_client or not _args_ns:
@@ -220,75 +345,17 @@ def api_manual() -> Any:
 
 
 def main() -> None:
-    global _mysql_store
-
-    p = argparse.ArgumentParser(description="Dashboard local + journal CSV via MQTT (+ MySQL optionnel)")
-    p.add_argument("--mqtt-host", default="127.0.0.1", help="Adresse du broker (souvent le PC local)")
-    p.add_argument("--mqtt-port", type=int, default=1883)
-    p.add_argument("--mqtt-user", default="", help="Optionnel")
-    p.add_argument("--mqtt-password", default="", help="Optionnel")
-    p.add_argument("--mqtt-client-id", default="irrigation_pc_bridge")
-    p.add_argument(
-        "--topic-telemetry",
-        default="irrigation/station/telemetry",
-        help="Doit correspondre a MQTT_TOPIC_TELEMETRY sur l'ESP32",
-    )
-    p.add_argument(
-        "--topic-command",
-        default="irrigation/command/manual",
-        help="Doit correspondre a MQTT_TOPIC_COMMAND sur l'ESP32",
-    )
-    p.add_argument("--csv-path", default="data/irrigation_log.csv", help="Fichier CSV sur le PC")
-    p.add_argument(
-        "--reset-csv",
-        action="store_true",
-        help="Sauvegarde le journal actuel (.bak.<timestamp>) et repart avec l'en-tete reduit (capteurs + manuel + modele)",
-    )
-    p.add_argument("--http-host", default="127.0.0.1")
-    p.add_argument("--http-port", type=int, default=8765)
-
-    p.add_argument(
-        "--no-mysql",
-        action="store_true",
-        help="Ne pas ecrire en base MySQL (CSV seul)",
-    )
-    p.add_argument("--mysql-host", default=os.environ.get("MYSQL_HOST", "127.0.0.1"))
-    p.add_argument("--mysql-port", type=int, default=int(os.environ.get("MYSQL_PORT", "3306")))
-    p.add_argument("--mysql-user", default=os.environ.get("MYSQL_USER", "root"))
-    p.add_argument("--mysql-password", default=os.environ.get("MYSQL_PASSWORD", ""))
-    p.add_argument("--mysql-database", default=os.environ.get("MYSQL_DATABASE", "irrigation"))
-    p.add_argument(
-        "--mysql-table",
-        default=os.environ.get("MYSQL_TABLE", "irrigation_telemetry"),
-        help="Nom de table (lettres, chiffres, underscore)",
-    )
-
-    ns = p.parse_args()
-
-    csv_path = Path(ns.csv_path).resolve()
-    print(f"[bridge] CSV : {csv_path}")
-    _ensure_csv_schema(csv_path, force_reset=ns.reset_csv, auto_fix_header=not ns.reset_csv)
-
-    _mysql_store = None
-    if not ns.no_mysql:
-        try:
-            _mysql_store = MySQLStore(
-                host=ns.mysql_host,
-                port=ns.mysql_port,
-                user=ns.mysql_user,
-                password=ns.mysql_password,
-                database=ns.mysql_database,
-                table=ns.mysql_table,
-            )
-            _mysql_store.ensure_table()
-            print(f"[bridge] MySQL pret (base + table) : `{ns.mysql_database}`.`{ns.mysql_table}`")
-        except Exception as e:
-            print(f"[bridge] MySQL desactive (erreur connexion ou DDL): {e}")
-            _mysql_store = None
-
-    _start_mqtt(ns)
+    ns = bootstrap()
     print(f"[bridge] Dashboard : http://{ns.http_host}:{ns.http_port}/")
+    print(f"[bridge] MQTT {ns.mqtt_host}:{ns.mqtt_port} tls={ns.mqtt_tls}")
     app.run(host=ns.http_host, port=ns.http_port, debug=False, threaded=True)
+
+
+if _env("MQTT_HOST") or _env("MQTT_BROKER_HOST") or _env("DATABASE_URL"):
+    try:
+        bootstrap()
+    except Exception as e:
+        print("[bridge] bootstrap au chargement:", e)
 
 
 if __name__ == "__main__":

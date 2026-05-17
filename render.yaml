@@ -1,0 +1,20 @@
+# Blueprint Render — racine du depot : pc_irrigation_bridge
+services:
+  - type: web
+    name: irrigation-bridge
+    runtime: python
+    rootDir: pc_irrigation_bridge
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn bridge:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+    plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.11"
+      - key: DEVICE_ID
+        value: station01
+      - key: MQTT_PORT
+        value: "8883"
+      - key: MQTT_TLS
+        value: "true"
+      - key: PG_TABLE
+        value: irrigation_telemetry

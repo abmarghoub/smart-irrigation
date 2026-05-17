@@ -1,0 +1,23 @@
+# Secrets ESP32 / pont
+esp32_weather_station/weather_secrets.h
+**/weather_secrets.h
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Donnees locales (le journal cloud est dans Supabase)
+pc_irrigation_bridge/data/*.csv
+pc_irrigation_bridge/data/*.bak.*
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
