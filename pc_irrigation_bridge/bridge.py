@@ -14,6 +14,7 @@ import io
 import json
 import os
 import ssl
+import sys
 import threading
 import time
 from pathlib import Path
@@ -109,7 +110,7 @@ def build_namespace(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--mysql-password", default=_env("MYSQL_PASSWORD", ""))
     p.add_argument("--mysql-database", default=_env("MYSQL_DATABASE", "irrigation"))
     p.add_argument("--mysql-table", default=_env("MYSQL_TABLE", "irrigation_telemetry"))
-    return p.parse_args(argv)
+    return p.parse_args(argv if argv is not None else [])
 
 
 def _write_header_only(path: Path) -> None:
@@ -345,17 +346,19 @@ def api_manual() -> Any:
 
 
 def main() -> None:
-    ns = bootstrap()
+    ns = bootstrap(sys.argv[1:])
     print(f"[bridge] Dashboard : http://{ns.http_host}:{ns.http_port}/")
     print(f"[bridge] MQTT {ns.mqtt_host}:{ns.mqtt_port} tls={ns.mqtt_tls}")
     app.run(host=ns.http_host, port=ns.http_port, debug=False, threaded=True)
 
 
-if _env("MQTT_HOST") or _env("MQTT_BROKER_HOST") or _env("DATABASE_URL"):
-    try:
-        bootstrap()
-    except Exception as e:
-        print("[bridge] bootstrap au chargement:", e)
+# Gunicorn (Render) importe ce module : ne pas lire sys.argv (contient "bridge:app", --bind, etc.)
+if __name__ != "__main__":
+    if _env("MQTT_HOST") or _env("MQTT_BROKER_HOST") or _env("DATABASE_URL"):
+        try:
+            bootstrap([])
+        except Exception as e:
+            print("[bridge] bootstrap au chargement:", e)
 
 
 if __name__ == "__main__":
