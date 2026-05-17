@@ -7,6 +7,8 @@ from __future__ import annotations
 import os
 import re
 from typing import Any
+from urllib.parse import quote, unquote, urlparse, urlunparse
+
 import psycopg2
 import psycopg2.extras
 
@@ -15,15 +17,63 @@ from db_mysql import TelemetryData, telemetry_to_csv_row
 _IDENTIFIER_SAFE = re.compile(r"^[A-Za-z0-9_]{1,64}$")
 
 
+def _running_on_render() -> bool:
+    return bool(os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID"))
+
+
+def _append_query_param(url: str, key: str, value: str) -> str:
+    p = urlparse(url)
+    q = p.query or ""
+    if f"{key}=" in q.lower():
+        return url
+    sep = "&" if q else ""
+    new_query = f"{q}{sep}{key}={value}" if q else f"{key}={value}"
+    return urlunparse(p._replace(query=new_query))
+
+
+def _rewrite_supabase_direct_to_pooler(url: str) -> str:
+    """
+    Render n'a souvent pas d'IPv6 : db.xxx.supabase.co:5432 echoue (Network unreachable).
+    Utilise le pooler Supabase (port 6543, IPv4) — region EU par defaut (Frankfurt).
+    """
+    p = urlparse(url)
+    host = (p.hostname or "").lower()
+    if "pooler.supabase.com" in host:
+        return url
+    if not host.startswith("db.") or not host.endswith(".supabase.co"):
+        return url
+    if (p.port or 5432) != 5432:
+        return url
+
+    project_ref = host[3 : -len(".supabase.co")]
+    pooler_host = os.environ.get(
+        "SUPABASE_POOLER_HOST", "aws-0-eu-central-1.pooler.supabase.com"
+    ).strip()
+    user = unquote(p.username or "postgres")
+    if user == "postgres":
+        user = f"postgres.{project_ref}"
+    password = unquote(p.password or "")
+    path = p.path or "/postgres"
+
+    auth = quote(user, safe="")
+    if password:
+        auth += ":" + quote(password, safe="")
+    netloc = f"{auth}@{pooler_host}:6543"
+    out = urlunparse(p._replace(netloc=netloc, path=path))
+    print(f"[bridge] Supabase: pooler {pooler_host}:6543 (evite IPv6 direct)")
+    return out
+
+
 def normalize_database_url(url: str) -> str:
-    """Supabase exige SSL ; ajoute sslmode=require si absent."""
+    """SSL + pooler automatique sur Render pour Supabase."""
     u = url.strip()
     if not u:
         return u
-    if "sslmode=" in u.lower():
-        return u
-    sep = "&" if "?" in u else "?"
-    return f"{u}{sep}sslmode=require"
+    if _running_on_render():
+        u = _rewrite_supabase_direct_to_pooler(u)
+    if "sslmode=" not in u.lower():
+        u = _append_query_param(u, "sslmode", "require")
+    return u
 
 
 class PostgresStore:

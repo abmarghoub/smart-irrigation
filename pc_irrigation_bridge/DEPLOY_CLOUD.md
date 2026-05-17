@@ -4,7 +4,7 @@
 
 | Variable | Exemple |
 |----------|---------|
-| `DATABASE_URL` | `postgresql://postgres:123am%23@db.xxx.supabase.co:5432/postgres` |
+| `DATABASE_URL` | URI Supabase (directe `db.xxx...:5432` OK : le pont bascule auto sur le **pooler** `:6543` sur Render) |
 | `MQTT_HOST` | `d5d4693246d54f46a43cefa118dea176.s1.eu.hivemq.cloud` |
 | `MQTT_PORT` | `8883` |
 | `MQTT_USER` | `irrigation_station01` |
