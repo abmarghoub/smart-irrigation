@@ -1,0 +1,99 @@
+# Decision Tree — regles interpretables (export_text sklearn)
+
+## Classification (irrigate)
+|--- soil_moisture_% <= 0.58
+|   |--- soil_moisture_% <= 0.39
+|   |   |--- soil_moisture_% <= 0.27
+|   |   |   |--- soil_moisture_% <= 0.22
+|   |   |   |   |--- class: 1
+|   |   |   |--- soil_moisture_% >  0.22
+|   |   |   |   |--- class: 1
+|   |   |--- soil_moisture_% >  0.27
+|   |   |   |--- soil_type_enc <= 1.50
+|   |   |   |   |--- class: 1
+|   |   |   |--- soil_type_enc >  1.50
+|   |   |   |   |--- class: 1
+|   |--- soil_moisture_% >  0.39
+|   |   |--- soil_type_enc <= 1.50
+|   |   |   |--- soil_type_enc <= 0.50
+|   |   |   |   |--- class: 1
+|   |   |   |--- soil_type_enc >  0.50
+|   |   |   |   |--- class: 1
+|   |   |--- soil_type_enc >  1.50
+|   |   |   |--- soil_moisture_% <= 0.44
+|   |   |   |   |--- class: 0
+|   |   |   |--- soil_moisture_% >  0.44
+|   |   |   |   |--- class: 0
+|--- soil_moisture_% >  0.58
+|   |--- soil_type_enc <= 0.50
+|   |   |--- soil_moisture_% <= 0.69
+|   |   |   |--- soil_moisture_% <= 0.64
+|   |   |   |   |--- class: 1
+|   |   |   |--- soil_moisture_% >  0.64
+|   |   |   |   |--- class: 0
+|   |   |--- soil_moisture_% >  0.69
+|   |   |   |--- soil_moisture_% <= 0.76
+|   |   |   |   |--- class: 0
+|   |   |   |--- soil_moisture_% >  0.76
+|   |   |   |   |--- class: 0
+|   |--- soil_type_enc >  0.50
+|   |   |--- rainfall_mm <= 0.00
+|   |   |   |--- rainfall_mm <= 0.00
+|   |   |   |   |--- class: 0
+|   |   |   |--- rainfall_mm >  0.00
+|   |   |   |   |--- class: 1
+|   |   |--- rainfall_mm >  0.00
+|   |   |   |--- soil_type_enc <= 1.50
+|   |   |   |   |--- class: 0
+|   |   |   |--- soil_type_enc >  1.50
+|   |   |   |   |--- class: 0
+
+
+## Regression (water_amount)
+|--- soil_moisture_% <= 0.56
+|   |--- soil_type_enc <= 1.50
+|   |   |--- soil_moisture_% <= 0.43
+|   |   |   |--- soil_type_enc <= 0.50
+|   |   |   |   |--- value: [615.70]
+|   |   |   |--- soil_type_enc >  0.50
+|   |   |   |   |--- value: [471.07]
+|   |   |--- soil_moisture_% >  0.43
+|   |   |   |--- soil_type_enc <= 0.50
+|   |   |   |   |--- value: [427.46]
+|   |   |   |--- soil_type_enc >  0.50
+|   |   |   |   |--- value: [231.09]
+|   |--- soil_type_enc >  1.50
+|   |   |--- soil_moisture_% <= 0.29
+|   |   |   |--- soil_type_enc <= 2.50
+|   |   |   |   |--- value: [289.94]
+|   |   |   |--- soil_type_enc >  2.50
+|   |   |   |   |--- value: [454.34]
+|   |   |--- soil_moisture_% >  0.29
+|   |   |   |--- soil_moisture_% <= 0.40
+|   |   |   |   |--- value: [180.49]
+|   |   |   |--- soil_moisture_% >  0.40
+|   |   |   |   |--- value: [52.20]
+|--- soil_moisture_% >  0.56
+|   |--- soil_moisture_% <= 0.65
+|   |   |--- soil_type_enc <= 0.50
+|   |   |   |--- soil_moisture_% <= 0.60
+|   |   |   |   |--- value: [290.99]
+|   |   |   |--- soil_moisture_% >  0.60
+|   |   |   |   |--- value: [191.69]
+|   |   |--- soil_type_enc >  0.50
+|   |   |   |--- soil_type_enc <= 1.50
+|   |   |   |   |--- value: [47.15]
+|   |   |   |--- soil_type_enc >  1.50
+|   |   |   |   |--- value: [3.29]
+|   |--- soil_moisture_% >  0.65
+|   |   |--- soil_moisture_% <= 0.74
+|   |   |   |--- soil_type_enc <= 0.50
+|   |   |   |   |--- value: [85.82]
+|   |   |   |--- soil_type_enc >  0.50
+|   |   |   |   |--- value: [2.93]
+|   |   |--- soil_moisture_% >  0.74
+|   |   |   |--- rainfall_mm <= 0.00
+|   |   |   |   |--- value: [56.00]
+|   |   |   |--- rainfall_mm >  0.00
+|   |   |   |   |--- value: [6.12]
+

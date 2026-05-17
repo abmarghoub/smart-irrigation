@@ -1,0 +1,61 @@
+Mosquitto sous Windows — corriger « local only » et rc=-2 sur l'ESP32
+====================================================================
+
+Probleme
+--------
+- Mosquitto 2.x sans fichier de config ecoute en « local only » : seul le PC peut se connecter.
+- L'ESP32 a besoin d'acceder a l'IP Wi-Fi du PC (ex. 10.222.28.36:1883).
+- Lancer mosquitto.exe -v en plus du service provoque « port 1883 deja utilise ».
+
+Solution (recommandee)
+----------------------
+1. Fermez toute fenetre ou vous avez lance manuellement mosquitto -v.
+
+2. Ouvrez PowerShell en **Administrateur** (clic droit -> Executer en tant qu'administrateur).
+
+3. Allez dans ce dossier :
+   cd "CHEMIN_VERS\11master pf\pc_irrigation_bridge"
+
+4. Executez :
+   .\apply_mosquitto_config.ps1
+
+   Le script copie mosquitto.conf vers C:\Program Files\mosquitto\mosquitto.conf
+   (sauvegarde de l'ancien fichier en .bak.*), puis redemarre le service Mosquitto.
+
+5. Pare-feu : autorisez le port TCP 1883 entrant si ce n'est pas deja fait.
+
+6. Sur le PC, lancez le pont :
+   python bridge.py
+
+7. Redemarrez l'ESP32 et verifiez le moniteur serie : plus de [MQTT] Echec, rc=-2.
+
+Solution manuelle
+-----------------
+Si vous preferez ne pas utiliser le script :
+- Copiez le fichier mosquitto.conf de ce dossier vers
+  C:\Program Files\mosquitto\mosquitto.conf
+  (remplacez l'existant ; faites une copie de sauvegarde avant).
+- services.msc -> Mosquitto Broker -> Redemarrer.
+
+Contenu minimal attendu dans mosquitto.conf
+---------------------------------------------
+listener 1883
+allow_anonymous true
+persistence false
+
+Journal CSV (irrigation_log.csv)
+---------------------------------
+- Colonnes reduites : saisie manuelle (culture, sol, age), capteurs / meteo (T, RH, pluie, vent, humidite sol) en nombres avec 2 decimales,
+  sorties modele (p_fraction, irrigate, irrigation_litres en litres, 2 decimales).
+- Reinitialiser : arreter bridge.py puis
+    python bridge.py --reset-csv
+  (sauvegarde .bak.<timestamp> puis en-tete seul).
+
+MySQL (optionnel — meme donnees que le CSV)
+--------------------------------------------
+- La base (MYSQL_DATABASE / --mysql-database, defaut irrigation) est creee automatiquement si elle n'existe pas.
+- La table (MYSQL_TABLE / --mysql-table) est creee automatiquement.
+- L'utilisateur MySQL doit avoir le droit CREATE (ou au minimum la base deja creee + droits sur celle-ci).
+- Variables d'environnement : MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE, MYSQL_TABLE
+- Ou options : --mysql-host ... --mysql-user ... --mysql-password ... --mysql-database ...
+- Sans MySQL : python bridge.py --no-mysql

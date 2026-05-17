@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Irrigation — Dashboard (PC)</title>
+<style>
+:root{--bg:#0f1419;--card:#1a2332;--txt:#e7ecf3;--muted:#8b9cb3;--acc:#3d9cf9;--ok:#34c759;--bar:#2d6cdf;}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh;padding:1rem}
+h1{font-size:1.25rem;margin:0 0 .5rem}
+.sub{color:var(--muted);font-size:.85rem;margin-bottom:.75rem}
+.sec{margin:1.5rem 0 .6rem;font-size:1rem;border-bottom:1px solid #2a3544;padding-bottom:.35rem}
+.row{display:flex;flex-wrap:wrap;gap:1rem;margin-top:1rem}
+.panel{flex:1;min-width:280px;background:var(--card);border-radius:10px;padding:1rem;border:1px solid #2a3544}
+label{display:block;font-size:.8rem;color:var(--muted);margin:.5rem 0 .2rem}
+input,select{width:100%;padding:.5rem;border-radius:8px;border:1px solid #2a3544;background:#0f1419;color:var(--txt)}
+button{margin-top:.75rem;padding:.55rem 1rem;border:none;border-radius:8px;background:var(--acc);color:#fff;font-weight:600;cursor:pointer}
+button.secondary{background:#2a3544;color:var(--txt)}
+button.secondary:hover{filter:brightness(1.12)}
+#msg{margin-top:.5rem;font-size:.85rem}
+#poll_err{color:#ff6b6b;font-size:.9rem;min-height:1.2em;margin:.25rem 0 1rem}
+#conn_block{margin-top:.75rem;font-size:.88rem;line-height:1.5;border-top:1px solid #2a3544;padding-top:.65rem}
+#conn_block strong{color:var(--txt);font-weight:600}
+#lastupd{font-size:.75rem;color:var(--muted);margin:.5rem 0}
+.chart-panel{background:var(--card);border-radius:10px;padding:1rem;border:1px solid #2a3544;margin-bottom:1rem}
+.barrow{display:grid;grid-template-columns:140px 1fr 72px;align-items:center;gap:.5rem;margin:.45rem 0;font-size:.85rem}
+.barlab{color:var(--muted)}
+.bartrack{height:10px;background:#0f1419;border-radius:6px;overflow:hidden}
+.barfill{height:100%;background:linear-gradient(90deg,var(--bar),var(--acc));border-radius:6px;transition:width .4s ease}
+.barval{text-align:right;font-variant-numeric:tabular-nums}
+.grid{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.card{background:var(--card);border-radius:10px;padding:.85rem;border:1px solid #2a3544}
+.card h2{margin:0 0 .5rem;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.val{font-size:1.2rem;font-weight:600}
+.val small{font-size:.72rem;color:var(--muted);font-weight:400}
+.badge{display:inline-block;padding:.15rem .45rem;border-radius:6px;font-size:.75rem}
+.badge.on{background:#1e4030;color:#8fd99a}
+.badge.off{background:#402020;color:#e99}
+footer{margin-top:1.5rem;font-size:.75rem;color:var(--muted)}
+a{color:var(--acc)}
+code{font-size:.85em}
+</style>
+</head>
+<body>
+<h1>Station d'irrigation (dashboard local)</h1>
+<p id="poll_err"></p>
+
+<div class="row">
+<div class="panel">
+<h2 style="margin:0 0 .75rem;font-size:1rem">Saisie manuelle</h2>
+<form id="f">
+<label>Age culture (jours, 1–120)</label>
+<input type="number" id="crop_age_days" min="1" max="120" placeholder="ex. 45" required/>
+<label>Culture</label>
+<select id="crop_idx" required>
+<option value="" disabled selected>— Choisir —</option>
+<option value="0">0 — Maize</option>
+<option value="1">1 — Rice</option>
+<option value="2">2 — Tomato</option>
+<option value="3">3 — Wheat</option>
+</select>
+<label>Type de sol</label>
+<select id="soil_idx" required>
+<option value="" disabled selected>— Choisir —</option>
+<option value="0">0 — Clayey</option>
+<option value="1">1 — Loamy</option>
+<option value="2">2 — Sandy</option>
+<option value="3">3 — Silty</option>
+</select>
+<button type="submit">Appliquer (MQTT)</button>
+<p id="msg"></p>
+</form>
+</div>
+<div class="panel">
+<h2 style="margin:0 0 .75rem;font-size:1rem">Connexion</h2>
+<p id="ip" style="margin:.5rem 0 0;font-size:.9rem"></p>
+<div id="conn_block">
+<p id="conn_flow" style="margin:.35rem 0"></p>
+<p id="conn_manual" style="margin:.35rem 0"></p>
+<p id="conn_decision" style="margin:.35rem 0"></p>
+</div>
+</div>
+</div>
+
+<h2 class="sec">Journal CSV (sur le PC)</h2>
+<div class="chart-panel">
+<p class="sub" style="margin:0 0 .75rem">Fichier local <code>data/irrigation_log.csv</code> (mise a jour automatique).</p>
+<button type="button" class="secondary" id="btn_dl_csv">Télécharger irrigation_log.csv</button>
+<p id="csv_dl_msg" class="sub" style="margin-top:.5rem"></p>
+</div>
+
+<h2 class="sec">Indicateurs visuels (barres)</h2>
+<div id="charts" class="chart-panel">
+<p class="sub" style="margin:0">Chargement des mesures…</p>
+</div>
+
+<h2 class="sec">Statistiques detaillees (cartes)</h2>
+<div class="grid" id="cards"><div class="card"><h2>En attente</h2><div class="val">—<small> </small></div></div></div>
+<p id="lastupd"></p>
+
+<footer>Mise a jour toutes les 2 secondes</footer>
+<script>
+const CROP_L=["Maize","Rice","Tomato","Wheat"];
+const SOIL_L=["Clayey","Loamy","Sandy","Silty"];
+const el=(h,t,v,u)=>`<div class="card"><h2>${h}</h2><div class="val">${v}<small> ${u||""}</small></div></div>`;
+function fmt(x,dec){
+  if(typeof x!=="number"||Number.isNaN(x)||!Number.isFinite(x)) return "—";
+  return x.toFixed(dec);
+}
+function clamp01(x){ if(!Number.isFinite(x)) return 0; return Math.max(0,Math.min(100,x)); }
+function bar(label,pct,valStr){
+  pct=clamp01(pct);
+  return `<div class="barrow"><span class="barlab">${label}</span><div class="bartrack"><div class="barfill" style="width:${pct}%"></div></div><span class="barval">${valStr}</span></div>`;
+}
+async function poll(){
+  const errEl=document.getElementById("poll_err");
+  const base=window.location.origin;
+  try{
+    errEl.textContent="";
+    const r=await fetch(base+"/api/state",{cache:"no-store"});
+    if(!r.ok){ errEl.textContent="Erreur /api/state HTTP "+r.status; return; }
+    const j=await r.json();
+    document.getElementById("ip").innerHTML="IP (ESP32) : <strong>"+(j.ip||"—")+"</strong>"+(j.wifi_connected?" ✓":" (WiFi ESP deconnecte)");
+    document.getElementById("lastupd").textContent="Derniere mise a jour : "+new Date().toLocaleTimeString();
+    const s=j.sensors||{},w=j.weather||{},m=j.model_inputs||{},d=j.decision||{};
+    const pred=!!(d&&d.prediction_active);
+    document.getElementById("conn_flow").innerHTML="<strong>Debit (capteur)</strong> : "+fmt(s.flow_lpm,2)+" L/min";
+    if(j.manual&&j.manual.confirmed){
+      const ci=typeof j.manual.crop_idx==="number"?j.manual.crop_idx:null;
+      const si=typeof j.manual.soil_idx==="number"?j.manual.soil_idx:null;
+      const ag=typeof j.manual.crop_age_days==="number"?j.manual.crop_age_days:null;
+      document.getElementById("conn_manual").innerHTML="<strong>Saisie active</strong> : age <strong>"+(ag!=null?ag:"—")+"</strong> j · <strong>"+(ci!=null?CROP_L[ci]:"—")+"</strong> · <strong>"+(si!=null?SOIL_L[si]:"—")+"</strong>";
+      document.getElementById("conn_decision").innerHTML="<strong>Decision</strong> : P="+fmt(d.p,4)+" · irriguer="+(d.irrigate===1||d.irrigate===true?"<strong>OUI</strong>":"<strong>NON</strong>")+" · vol. modele "+fmt(d.volume_model_l,2)+" L · vanne "+(d.valve_on?"<strong>ON</strong>":"<strong>OFF</strong>")+" · dose "+fmt(d.dose_delivered_l,2)+"/"+fmt(d.dose_target_l,2)+" L";
+    }else{
+      document.getElementById("conn_manual").innerHTML="<strong>Saisie manuelle</strong> : <span style=color:var(--muted)>en attente — remplissez le formulaire puis <em>Appliquer</em> ou configurez l'ESP32 en serie (A/C/S)</span>";
+      document.getElementById("conn_decision").innerHTML="<strong>Decision MLP</strong> : <span style=color:var(--muted)>inactive (pas de prediction sans saisie confirmee)</span>";
+    }
+    const soil=typeof s.soil_pct==="number"&&Number.isFinite(s.soil_pct)?s.soil_pct:NaN;
+    const tloc=typeof s.temp_c==="number"&&Number.isFinite(s.temp_c)?s.temp_c:NaN;
+    const rhloc=typeof s.rh_pct==="number"&&Number.isFinite(s.rh_pct)?s.rh_pct:NaN;
+    const tw=typeof w.temp_c==="number"&&Number.isFinite(w.temp_c)?w.temp_c:NaN;
+    const rhw=typeof w.rh_pct==="number"&&Number.isFinite(w.rh_pct)?w.rh_pct:NaN;
+    const rain=typeof w.rain_mm==="number"&&Number.isFinite(w.rain_mm)?w.rain_mm:NaN;
+    const wind=typeof w.wind_ms==="number"&&Number.isFinite(w.wind_ms)?w.wind_ms:NaN;
+    document.getElementById("charts").innerHTML=[
+      bar("Sol local (%)",soil,fmt(soil,1)+"%"),
+      bar("Temperature locale",Number.isFinite(tloc)?(tloc-5)/40*100:0,fmt(tloc,1)+" C"),
+      bar("Humidite air locale",rhloc,fmt(rhloc,1)+"%"),
+      bar("Meteo temperature",Number.isFinite(tw)?(tw-5)/40*100:0,fmt(tw,1)+" C"),
+      bar("Meteo humidite",rhw,fmt(rhw,1)+"%"),
+      bar("Pluie station (0-30mm)",Number.isFinite(rain)?rain/30*100:0,fmt(rain,2)+" mm"),
+      bar("Vent (0-15 m/s)",Number.isFinite(wind)?wind/15*100:0,fmt(wind,2)+" m/s"),
+      bar("Prob. irrigation (P)",pred&&typeof d.p==="number"&&Number.isFinite(d.p)?d.p*100:0,pred?fmt(d.p,4):"—"),
+      bar("Volume modele / 2L",pred&&typeof d.volume_model_l==="number"&&Number.isFinite(d.volume_model_l)?d.volume_model_l/2*100:0,pred?fmt(d.volume_model_l,2)+" L":"—")
+    ].join("");
+    document.getElementById("cards").innerHTML=[
+      el("Sol (local)",null,fmt(s.soil_pct,1),"%"),
+      el("Temperature (local)",null,fmt(s.temp_c,1),"C"),
+      el("Humidite air (local)",null,fmt(s.rh_pct,1),"%"),
+      el("Debit",null,fmt(s.flow_lpm,2),"L/min"),
+      el("Meteo T",null,fmt(w.temp_c,1),"C"),
+      el("Meteo RH",null,fmt(w.rh_pct,1),"%"),
+      el("Pluie (station)",null,fmt(w.rain_mm,2),"mm"),
+      el("Vent (station)",null,fmt(w.wind_ms,2),"m/s"),
+      el("Entrees modele — Sol",null,pred?fmt(m.soil_pct,1):"—","%"),
+      el("Entrees — T / RH / Pluie",null,pred?[m.temp_c,m.rh_pct,m.rain_mm].map(x=>fmt(x,1)).join(" / "):"—",""),
+      el("Age / Culture / Sol",null,pred?((typeof m.age_days==="number"?m.age_days:"—")+" · "+(m.crop||"—")+" · "+(m.soil||"—")):"—",""),
+      el("P(irrigation)",null,pred?fmt(d.p,4):"—",""),
+      el("Irriguer",null,pred?((d.irrigate===1||d.irrigate===true)?"OUI":"NON"):"—",""),
+      el("Volume modele",null,pred?fmt(d.volume_model_l,2):"—","L"),
+      el("Cible sol",null,pred?fmt(d.soil_target_pct,1):"—","%"),
+      el("Vanne",null,pred?((d.valve_on?"ON":"OFF")+" <span class='badge "+(d.valve_on?"on":"off")+"'>"+(d.valve_on?"ouverte":"fermee")+"</span>"):"—",""),
+      el("Dose livree / cible",null,pred?fmt(d.dose_delivered_l,2)+" / "+fmt(d.dose_target_l,2):"—","L"),
+      el("Fallback / Vent bloc.",null,pred?((d.fallback?"oui":"non")+" · "+(d.wind_block?"oui":"non")):"—",""),
+      el("Saisie manuelle",null,(j.manual&&j.manual.confirmed)?"confirmee":"en attente","")
+    ].join("");
+    if(j.manual&&j.manual.confirmed){
+      if(typeof j.manual.crop_age_days==="number")document.getElementById("crop_age_days").value=String(j.manual.crop_age_days);
+      if(typeof j.manual.crop_idx==="number")document.getElementById("crop_idx").value=String(j.manual.crop_idx);
+      if(typeof j.manual.soil_idx==="number")document.getElementById("soil_idx").value=String(j.manual.soil_idx);
+    }
+  }catch(e){
+    console.error(e);
+    errEl.textContent="Echec lecture API : "+(e&&e.message?e.message:String(e))+" — URL : "+base+"/";
+  }
+}
+document.getElementById("f").onsubmit=async (e)=>{
+  e.preventDefault();
+  const msg=document.getElementById("msg");
+  msg.textContent="Envoi MQTT…";
+  const body=new URLSearchParams({
+    crop_age_days:document.getElementById("crop_age_days").value,
+    crop_idx:document.getElementById("crop_idx").value,
+    soil_idx:document.getElementById("soil_idx").value
+  });
+  try{
+    const r=await fetch(window.location.origin+"/api/manual",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
+    const t=await r.json();
+    msg.textContent=r.ok&&(t&&t.ok)?"Commande MQTT envoyee":"Erreur "+r.status+": "+JSON.stringify(t);
+    poll();
+  }catch(err){msg.textContent="Erreur reseau";}
+};
+document.getElementById("btn_dl_csv").onclick=async function(){
+  const msg=document.getElementById("csv_dl_msg");
+  msg.textContent="Preparation…";
+  const u=window.location.origin+"/api/irrigation_log.csv";
+  try{
+    const r=await fetch(u);
+    if(!r.ok){
+      let t="";
+      try{t=await r.text();}catch(_){}
+      msg.textContent="Erreur "+r.status+(t?": "+t:"");
+      return;
+    }
+    const blob=await r.blob();
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download="irrigation_log.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+    msg.textContent="Telechargement lance.";
+  }catch(e){
+    msg.textContent="Echec reseau : "+(e&&e.message?e.message:String(e));
+  }
+};
+setInterval(poll,2000);
+poll();
+</script>
+</body>
+</html>

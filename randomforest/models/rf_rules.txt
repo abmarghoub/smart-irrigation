@@ -1,0 +1,939 @@
+# Random Forest — regles simplifiees (premier arbre de chaque modele)
+
+## Classification (irrigate) — arbre[0]
+|--- num__crop_age_days <= 0.05
+|   |--- num__soil_moisture_% <= 0.41
+|   |   |--- num__temperature_C <= 0.91
+|   |   |   |--- cat__crop_name_Rice <= 0.50
+|   |   |   |   |--- num__temperature_C <= 0.35
+|   |   |   |   |   |--- cat__soil_type_Loamy <= 0.50
+|   |   |   |   |   |   |--- num__soil_moisture_% <= 0.32
+|   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.26
+|   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.02
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.02
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.22
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.22
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.26
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.01
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.01
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |--- num__soil_moisture_% >  0.32
+|   |   |   |   |   |   |   |--- num__temperature_C <= 0.14
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Maize <= 0.50
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Maize >  0.50
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__temperature_C >  0.14
+|   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |--- cat__soil_type_Loamy >  0.50
+|   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |--- num__temperature_C >  0.35
+|   |   |   |   |   |--- num__soil_moisture_% <= 0.29
+|   |   |   |   |   |   |--- cat__crop_name_Maize <= 0.50
+|   |   |   |   |   |   |   |--- num__humidity_% <= 0.22
+|   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.19
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__humidity_% >  0.19
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__humidity_% >  0.22
+|   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |--- cat__crop_name_Maize >  0.50
+|   |   |   |   |   |   |   |--- num__crop_age_days <= 0.03
+|   |   |   |   |   |   |   |   |--- num__temperature_C <= 0.82
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.13
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.13
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__temperature_C >  0.82
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__crop_age_days >  0.03
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.05
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.05
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |--- num__soil_moisture_% >  0.29
+|   |   |   |   |   |   |--- num__rainfall_mm <= 0.02
+|   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |--- num__rainfall_mm >  0.02
+|   |   |   |   |   |   |   |--- num__humidity_% <= 0.89
+|   |   |   |   |   |   |   |   |--- cat__soil_type_Silty <= 0.50
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.04
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.04
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- cat__soil_type_Silty >  0.50
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.18
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.18
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__humidity_% >  0.89
+|   |   |   |   |   |   |   |   |--- num__temperature_C <= 0.70
+|   |   |   |   |   |   |   |   |   |--- cat__soil_type_Loamy <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- cat__soil_type_Loamy >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__temperature_C >  0.70
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.93
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% >  0.93
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |--- cat__crop_name_Rice >  0.50
+|   |   |   |   |--- cat__soil_type_Sandy <= 0.50
+|   |   |   |   |   |--- cat__soil_type_Silty <= 0.50
+|   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |--- cat__soil_type_Silty >  0.50
+|   |   |   |   |   |   |--- num__crop_age_days <= 0.05
+|   |   |   |   |   |   |   |--- num__temperature_C <= 0.86
+|   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__temperature_C >  0.86
+|   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.39
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__humidity_% >  0.39
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |--- num__crop_age_days >  0.05
+|   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |--- cat__soil_type_Sandy >  0.50
+|   |   |   |   |   |--- num__rainfall_mm <= 0.01
+|   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |--- num__rainfall_mm >  0.01
+|   |   |   |   |   |   |--- num__humidity_% <= 0.45
+|   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.34
+|   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.34
+|   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |--- num__humidity_% >  0.45
+|   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.23
+|   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.23
+|   |   |   |   |   |   |   |   |--- num__temperature_C <= 0.52
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.07
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.07
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__temperature_C >  0.52
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.69
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% >  0.69
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |--- num__temperature_C >  0.91
+|   |   |   |--- class: 1.0
+|   |--- num__soil_moisture_% >  0.41
+|   |   |--- num__crop_age_days <= 0.02
+|   |   |   |--- num__temperature_C <= 0.99
+|   |   |   |   |--- cat__crop_name_Maize <= 0.50
+|   |   |   |   |   |--- cat__soil_type_Sandy <= 0.50
+|   |   |   |   |   |   |--- num__humidity_% <= 0.14
+|   |   |   |   |   |   |   |--- cat__crop_name_Wheat <= 0.50
+|   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- cat__crop_name_Wheat >  0.50
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.09
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.09
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |--- num__humidity_% >  0.14
+|   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.65
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Wheat <= 0.50
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.01
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.01
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Wheat >  0.50
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.02
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.02
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.65
+|   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.27
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__humidity_% >  0.27
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.45
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% >  0.45
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |--- cat__soil_type_Sandy >  0.50
+|   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |--- cat__crop_name_Maize >  0.50
+|   |   |   |   |   |--- num__rainfall_mm <= 0.02
+|   |   |   |   |   |   |--- num__rainfall_mm <= 0.02
+|   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |--- num__rainfall_mm >  0.02
+|   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |--- num__rainfall_mm >  0.02
+|   |   |   |   |   |   |--- class: 0.0
+|   |   |   |--- num__temperature_C >  0.99
+|   |   |   |   |--- class: 1.0
+|   |   |--- num__crop_age_days >  0.02
+|   |   |   |--- cat__soil_type_Sandy <= 0.50
+|   |   |   |   |--- num__temperature_C <= 0.14
+|   |   |   |   |   |--- num__rainfall_mm <= 0.05
+|   |   |   |   |   |   |--- num__temperature_C <= 0.05
+|   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |--- num__temperature_C >  0.05
+|   |   |   |   |   |   |   |--- num__crop_age_days <= 0.03
+|   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__crop_age_days >  0.03
+|   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |--- num__rainfall_mm >  0.05
+|   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |--- num__temperature_C >  0.14
+|   |   |   |   |   |--- num__temperature_C <= 0.50
+|   |   |   |   |   |   |--- num__soil_moisture_% <= 0.60
+|   |   |   |   |   |   |   |--- cat__soil_type_Clayey <= 0.50
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Tomato <= 0.50
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Wheat <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Wheat >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Tomato >  0.50
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.04
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.04
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- cat__soil_type_Clayey >  0.50
+|   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |--- num__soil_moisture_% >  0.60
+|   |   |   |   |   |   |   |--- num__temperature_C <= 0.45
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Rice <= 0.50
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.72
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.72
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Rice >  0.50
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.73
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.73
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__temperature_C >  0.45
+|   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |--- num__temperature_C >  0.50
+|   |   |   |   |   |   |--- num__soil_moisture_% <= 0.70
+|   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.01
+|   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.48
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.48
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__rainfall_mm >  0.01
+|   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.04
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Maize <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Maize >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.04
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.05
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.05
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |--- num__soil_moisture_% >  0.70
+|   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.77
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Tomato <= 0.50
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.76
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.76
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Tomato >  0.50
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.77
+|   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |--- cat__soil_type_Sandy >  0.50
+|   |   |   |   |--- class: 0.0
+|--- num__crop_age_days >  0.05
+|   |--- num__humidity_% <= 0.92
+|   |   |--- num__soil_moisture_% <= 0.58
+|   |   |   |--- cat__soil_type_Loamy <= 0.50
+|   |   |   |   |--- cat__soil_type_Clayey <= 0.50
+|   |   |   |   |   |--- num__crop_age_days <= 0.48
+|   |   |   |   |   |   |--- num__temperature_C <= 0.92
+|   |   |   |   |   |   |   |--- num__crop_age_days <= 0.26
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Rice <= 0.50
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.30
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% >  0.30
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Rice >  0.50
+|   |   |   |   |   |   |   |   |   |--- cat__soil_type_Silty <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- cat__soil_type_Silty >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__crop_age_days >  0.26
+|   |   |   |   |   |   |   |   |--- num__temperature_C <= 0.11
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.22
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.22
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__temperature_C >  0.11
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.02
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.02
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |--- num__temperature_C >  0.92
+|   |   |   |   |   |   |   |--- num__temperature_C <= 0.95
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Maize <= 0.50
+|   |   |   |   |   |   |   |   |   |--- num__temperature_C <= 0.93
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__temperature_C >  0.93
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Maize >  0.50
+|   |   |   |   |   |   |   |   |   |--- cat__soil_type_Sandy <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- cat__soil_type_Sandy >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__temperature_C >  0.95
+|   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.10
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.04
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.04
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__humidity_% >  0.10
+|   |   |   |   |   |   |   |   |   |--- num__temperature_C <= 0.96
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__temperature_C >  0.96
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |--- num__crop_age_days >  0.48
+|   |   |   |   |   |   |--- num__rainfall_mm <= 0.26
+|   |   |   |   |   |   |   |--- num__temperature_C <= 0.20
+|   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.30
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.90
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% >  0.90
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.30
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.36
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% >  0.36
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__temperature_C >  0.20
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.24
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.29
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.29
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.24
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.59
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.59
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |--- num__rainfall_mm >  0.26
+|   |   |   |   |   |   |   |--- cat__soil_type_Silty <= 0.50
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.39
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.39
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Maize <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Maize >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- cat__soil_type_Silty >  0.50
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Tomato <= 0.50
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Tomato >  0.50
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.82
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.82
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |--- cat__soil_type_Clayey >  0.50
+|   |   |   |   |   |--- num__rainfall_mm <= 0.27
+|   |   |   |   |   |   |--- cat__crop_name_Wheat <= 0.50
+|   |   |   |   |   |   |   |--- num__crop_age_days <= 0.99
+|   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.14
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.14
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Maize <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Maize >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__crop_age_days >  0.99
+|   |   |   |   |   |   |   |   |--- num__temperature_C <= 0.10
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__temperature_C >  0.10
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Tomato <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Tomato >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |--- cat__crop_name_Wheat >  0.50
+|   |   |   |   |   |   |   |--- num__temperature_C <= 0.24
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.01
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.01
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.04
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% >  0.04
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__temperature_C >  0.24
+|   |   |   |   |   |   |   |   |--- num__temperature_C <= 0.76
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.09
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.09
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__temperature_C >  0.76
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.04
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.04
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |--- num__rainfall_mm >  0.27
+|   |   |   |   |   |   |--- num__soil_moisture_% <= 0.42
+|   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |--- num__soil_moisture_% >  0.42
+|   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.38
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Rice <= 0.50
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.27
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.27
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Rice >  0.50
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.30
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.30
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__rainfall_mm >  0.38
+|   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |--- cat__soil_type_Loamy >  0.50
+|   |   |   |   |--- num__temperature_C <= 0.00
+|   |   |   |   |   |--- class: 0.0
+|   |   |   |   |--- num__temperature_C >  0.00
+|   |   |   |   |   |--- num__soil_moisture_% <= 0.50
+|   |   |   |   |   |   |--- num__soil_moisture_% <= 0.43
+|   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.33
+|   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.23
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Wheat <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Wheat >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.23
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Tomato <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Tomato >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.33
+|   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.34
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.26
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.26
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.34
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.36
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.36
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |--- num__soil_moisture_% >  0.43
+|   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.43
+|   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.84
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Rice <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Rice >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__humidity_% >  0.84
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.43
+|   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.50
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.47
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.47
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.50
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.04
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.04
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |--- num__soil_moisture_% >  0.50
+|   |   |   |   |   |   |--- cat__crop_name_Wheat <= 0.50
+|   |   |   |   |   |   |   |--- num__crop_age_days <= 0.86
+|   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.29
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.81
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.81
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__humidity_% >  0.29
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Rice <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Rice >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__crop_age_days >  0.86
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.05
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.57
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% >  0.57
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.05
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Rice <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- cat__crop_name_Rice >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |--- cat__crop_name_Wheat >  0.50
+|   |   |   |   |   |   |   |--- num__crop_age_days <= 0.99
+|   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.51
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.53
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% >  0.53
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.51
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.42
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.42
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__crop_age_days >  0.99
+|   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |--- num__soil_moisture_% >  0.58
+|   |   |   |--- cat__soil_type_Silty <= 0.50
+|   |   |   |   |--- cat__soil_type_Clayey <= 0.50
+|   |   |   |   |   |--- num__rainfall_mm <= 0.00
+|   |   |   |   |   |   |--- cat__crop_name_Rice <= 0.50
+|   |   |   |   |   |   |   |--- cat__crop_name_Tomato <= 0.50
+|   |   |   |   |   |   |   |   |--- num__temperature_C <= 0.24
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.43
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.43
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__temperature_C >  0.24
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.00
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.00
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- cat__crop_name_Tomato >  0.50
+|   |   |   |   |   |   |   |   |--- num__temperature_C <= 0.40
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__temperature_C >  0.40
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |--- cat__crop_name_Rice >  0.50
+|   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |--- num__rainfall_mm >  0.00
+|   |   |   |   |   |   |--- num__soil_moisture_% <= 0.74
+|   |   |   |   |   |   |   |--- num__temperature_C <= 0.04
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.02
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.02
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.35
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% >  0.35
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__temperature_C >  0.04
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.43
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.24
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.24
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.43
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |--- num__soil_moisture_% >  0.74
+|   |   |   |   |   |   |   |--- num__temperature_C <= 0.93
+|   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.55
+|   |   |   |   |   |   |   |   |   |--- num__temperature_C <= 0.16
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__temperature_C >  0.16
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__humidity_% >  0.55
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__temperature_C >  0.93
+|   |   |   |   |   |   |   |   |--- num__temperature_C <= 0.94
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__temperature_C >  0.94
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |--- cat__soil_type_Clayey >  0.50
+|   |   |   |   |   |--- num__temperature_C <= 0.01
+|   |   |   |   |   |   |--- num__temperature_C <= 0.00
+|   |   |   |   |   |   |   |--- cat__crop_name_Wheat <= 0.50
+|   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- cat__crop_name_Wheat >  0.50
+|   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |--- num__temperature_C >  0.00
+|   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |--- num__temperature_C >  0.01
+|   |   |   |   |   |   |--- num__soil_moisture_% <= 0.64
+|   |   |   |   |   |   |   |--- cat__crop_name_Maize <= 0.50
+|   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.98
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.42
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.42
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.98
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- cat__crop_name_Maize >  0.50
+|   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.12
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.07
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% >  0.07
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__humidity_% >  0.12
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.63
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.63
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |--- num__soil_moisture_% >  0.64
+|   |   |   |   |   |   |   |--- cat__crop_name_Maize <= 0.50
+|   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.57
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.02
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.02
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__humidity_% >  0.57
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.55
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.55
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- cat__crop_name_Maize >  0.50
+|   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.07
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.07
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.01
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.01
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |--- cat__soil_type_Silty >  0.50
+|   |   |   |   |--- cat__crop_name_Rice <= 0.50
+|   |   |   |   |   |--- cat__crop_name_Maize <= 0.50
+|   |   |   |   |   |   |--- num__soil_moisture_% <= 0.59
+|   |   |   |   |   |   |   |--- num__humidity_% <= 0.41
+|   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__humidity_% >  0.41
+|   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.38
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.38
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |--- num__soil_moisture_% >  0.59
+|   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.60
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Wheat <= 0.50
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% <= 0.10
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__humidity_% >  0.10
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- cat__crop_name_Wheat >  0.50
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.60
+|   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |--- cat__crop_name_Maize >  0.50
+|   |   |   |   |   |   |--- num__temperature_C <= 0.78
+|   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.01
+|   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__rainfall_mm >  0.01
+|   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |--- num__temperature_C >  0.78
+|   |   |   |   |   |   |   |--- num__crop_age_days <= 0.26
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.15
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.15
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__crop_age_days >  0.26
+|   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |--- cat__crop_name_Rice >  0.50
+|   |   |   |   |   |--- class: 0.0
+|   |--- num__humidity_% >  0.92
+|   |   |--- num__crop_age_days <= 0.79
+|   |   |   |--- num__temperature_C <= 0.99
+|   |   |   |   |--- num__temperature_C <= 0.98
+|   |   |   |   |   |--- num__rainfall_mm <= 0.30
+|   |   |   |   |   |   |--- num__humidity_% <= 0.93
+|   |   |   |   |   |   |   |--- num__crop_age_days <= 0.76
+|   |   |   |   |   |   |   |   |--- cat__soil_type_Loamy <= 0.50
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.35
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.35
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- cat__soil_type_Loamy >  0.50
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.42
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.42
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__crop_age_days >  0.76
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.03
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.03
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |--- num__humidity_% >  0.93
+|   |   |   |   |   |   |   |--- num__crop_age_days <= 0.56
+|   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.26
+|   |   |   |   |   |   |   |   |   |--- num__temperature_C <= 0.04
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__temperature_C >  0.04
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.26
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.49
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.49
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__crop_age_days >  0.56
+|   |   |   |   |   |   |   |   |--- num__temperature_C <= 0.96
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.74
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.74
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__temperature_C >  0.96
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |--- num__rainfall_mm >  0.30
+|   |   |   |   |   |   |--- num__soil_moisture_% <= 0.52
+|   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.61
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.50
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.50
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__rainfall_mm >  0.61
+|   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |--- num__soil_moisture_% >  0.52
+|   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |--- num__temperature_C >  0.98
+|   |   |   |   |   |--- class: 0.0
+|   |   |   |--- num__temperature_C >  0.99
+|   |   |   |   |--- class: 1.0
+|   |   |--- num__crop_age_days >  0.79
+|   |   |   |--- num__crop_age_days <= 0.82
+|   |   |   |   |--- num__temperature_C <= 0.76
+|   |   |   |   |   |--- num__crop_age_days <= 0.79
+|   |   |   |   |   |   |--- cat__soil_type_Clayey <= 0.50
+|   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |--- cat__soil_type_Clayey >  0.50
+|   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |--- num__crop_age_days >  0.79
+|   |   |   |   |   |   |--- cat__soil_type_Silty <= 0.50
+|   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |--- cat__soil_type_Silty >  0.50
+|   |   |   |   |   |   |   |--- num__humidity_% <= 0.92
+|   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__humidity_% >  0.92
+|   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |--- num__temperature_C >  0.76
+|   |   |   |   |   |--- class: 1.0
+|   |   |   |--- num__crop_age_days >  0.82
+|   |   |   |   |--- num__rainfall_mm <= 0.02
+|   |   |   |   |   |--- num__humidity_% <= 0.98
+|   |   |   |   |   |   |--- num__temperature_C <= 0.26
+|   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.32
+|   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.32
+|   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.37
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.37
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |--- num__temperature_C >  0.26
+|   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |--- num__humidity_% >  0.98
+|   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |--- num__rainfall_mm >  0.02
+|   |   |   |   |   |--- num__temperature_C <= 0.61
+|   |   |   |   |   |   |--- num__humidity_% <= 0.92
+|   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |--- num__humidity_% >  0.92
+|   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.42
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.12
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.12
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.15
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.15
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.42
+|   |   |   |   |   |   |   |   |--- num__crop_age_days <= 0.89
+|   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__crop_age_days >  0.89
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.05
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.05
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |--- num__temperature_C >  0.61
+|   |   |   |   |   |   |--- num__rainfall_mm <= 0.04
+|   |   |   |   |   |   |   |--- cat__crop_name_Rice <= 0.50
+|   |   |   |   |   |   |   |   |--- num__temperature_C <= 0.77
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.39
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.39
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__temperature_C >  0.77
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |--- cat__crop_name_Rice >  0.50
+|   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |--- num__rainfall_mm >  0.04
+|   |   |   |   |   |   |   |--- num__humidity_% <= 0.97
+|   |   |   |   |   |   |   |   |--- num__soil_moisture_% <= 0.46
+|   |   |   |   |   |   |   |   |   |--- cat__soil_type_Sandy <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- cat__soil_type_Sandy >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |   |--- num__soil_moisture_% >  0.46
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm <= 0.11
+|   |   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |   |--- num__rainfall_mm >  0.11
+|   |   |   |   |   |   |   |   |   |   |--- class: 0.0
+|   |   |   |   |   |   |   |--- num__humidity_% >  0.97
+|   |   |   |   |   |   |   |   |--- cat__soil_type_Loamy <= 0.50
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+|   |   |   |   |   |   |   |   |--- cat__soil_type_Loamy >  0.50
+|   |   |   |   |   |   |   |   |   |--- class: 1.0
+
+
+## Regression (water_amount) — arbre[0]
+|--- num__soil_moisture_% <= 0.57
+|   |--- cat__soil_type_Clayey <= 0.50
+|   |   |--- num__soil_moisture_% <= 0.44
+|   |   |   |--- cat__soil_type_Loamy <= 0.50
+|   |   |   |   |--- num__soil_moisture_% <= 0.29
+|   |   |   |   |   |--- cat__soil_type_Silty <= 0.50
+|   |   |   |   |   |   |--- value: [276.98]
+|   |   |   |   |   |--- cat__soil_type_Silty >  0.50
+|   |   |   |   |   |   |--- value: [445.03]
+|   |   |   |   |--- num__soil_moisture_% >  0.29
+|   |   |   |   |   |--- cat__soil_type_Silty <= 0.50
+|   |   |   |   |   |   |--- value: [67.08]
+|   |   |   |   |   |--- cat__soil_type_Silty >  0.50
+|   |   |   |   |   |   |--- value: [231.23]
+|   |   |   |--- cat__soil_type_Loamy >  0.50
+|   |   |   |   |--- num__soil_moisture_% <= 0.34
+|   |   |   |   |   |--- num__temperature_C <= 0.48
+|   |   |   |   |   |   |--- value: [458.27]
+|   |   |   |   |   |--- num__temperature_C >  0.48
+|   |   |   |   |   |   |--- value: [608.89]
+|   |   |   |   |--- num__soil_moisture_% >  0.34
+|   |   |   |   |   |--- num__rainfall_mm <= 0.05
+|   |   |   |   |   |   |--- value: [458.28]
+|   |   |   |   |   |--- num__rainfall_mm >  0.05
+|   |   |   |   |   |   |--- value: [377.88]
+|   |   |--- num__soil_moisture_% >  0.44
+|   |   |   |--- cat__soil_type_Loamy <= 0.50
+|   |   |   |   |--- num__soil_moisture_% <= 0.47
+|   |   |   |   |   |--- num__crop_age_days <= 0.97
+|   |   |   |   |   |   |--- value: [76.26]
+|   |   |   |   |   |--- num__crop_age_days >  0.97
+|   |   |   |   |   |   |--- value: [442.15]
+|   |   |   |   |--- num__soil_moisture_% >  0.47
+|   |   |   |   |   |--- num__soil_moisture_% <= 0.48
+|   |   |   |   |   |   |--- value: [49.69]
+|   |   |   |   |   |--- num__soil_moisture_% >  0.48
+|   |   |   |   |   |   |--- value: [16.22]
+|   |   |   |--- cat__soil_type_Loamy >  0.50
+|   |   |   |   |--- num__soil_moisture_% <= 0.50
+|   |   |   |   |   |--- num__rainfall_mm <= 0.09
+|   |   |   |   |   |   |--- value: [326.56]
+|   |   |   |   |   |--- num__rainfall_mm >  0.09
+|   |   |   |   |   |   |--- value: [165.10]
+|   |   |   |   |--- num__soil_moisture_% >  0.50
+|   |   |   |   |   |--- num__soil_moisture_% <= 0.54
+|   |   |   |   |   |   |--- value: [167.78]
+|   |   |   |   |   |--- num__soil_moisture_% >  0.54
+|   |   |   |   |   |   |--- value: [87.13]
+|   |--- cat__soil_type_Clayey >  0.50
+|   |   |--- num__soil_moisture_% <= 0.39
+|   |   |   |--- num__crop_age_days <= 0.13
+|   |   |   |   |--- num__soil_moisture_% <= 0.37
+|   |   |   |   |   |--- value: [629.25]
+|   |   |   |   |--- num__soil_moisture_% >  0.37
+|   |   |   |   |   |--- num__rainfall_mm <= 0.10
+|   |   |   |   |   |   |--- value: [0.00]
+|   |   |   |   |   |--- num__rainfall_mm >  0.10
+|   |   |   |   |   |   |--- value: [503.39]
+|   |   |   |--- num__crop_age_days >  0.13
+|   |   |   |   |--- num__crop_age_days <= 0.79
+|   |   |   |   |   |--- num__crop_age_days <= 0.43
+|   |   |   |   |   |   |--- value: [654.55]
+|   |   |   |   |   |--- num__crop_age_days >  0.43
+|   |   |   |   |   |   |--- value: [986.97]
+|   |   |   |   |--- num__crop_age_days >  0.79
+|   |   |   |   |   |--- num__humidity_% <= 0.24
+|   |   |   |   |   |   |--- value: [1014.90]
+|   |   |   |   |   |--- num__humidity_% >  0.24
+|   |   |   |   |   |   |--- value: [422.15]
+|   |   |--- num__soil_moisture_% >  0.39
+|   |   |   |--- num__temperature_C <= 0.99
+|   |   |   |   |--- num__soil_moisture_% <= 0.55
+|   |   |   |   |   |--- num__soil_moisture_% <= 0.55
+|   |   |   |   |   |   |--- value: [446.60]
+|   |   |   |   |   |--- num__soil_moisture_% >  0.55
+|   |   |   |   |   |   |--- value: [834.32]
+|   |   |   |   |--- num__soil_moisture_% >  0.55
+|   |   |   |   |   |--- num__humidity_% <= 0.15
+|   |   |   |   |   |   |--- value: [187.08]
+|   |   |   |   |   |--- num__humidity_% >  0.15
+|   |   |   |   |   |   |--- value: [394.79]
+|   |   |   |--- num__temperature_C >  0.99
+|   |   |   |   |--- value: [969.49]
+|--- num__soil_moisture_% >  0.57
+|   |--- num__soil_moisture_% <= 0.66
+|   |   |--- cat__soil_type_Clayey <= 0.50
+|   |   |   |--- num__rainfall_mm <= 0.00
+|   |   |   |   |--- num__soil_moisture_% <= 0.61
+|   |   |   |   |   |--- value: [0.00]
+|   |   |   |   |--- num__soil_moisture_% >  0.61
+|   |   |   |   |   |--- value: [381.45]
+|   |   |   |--- num__rainfall_mm >  0.00
+|   |   |   |   |--- num__crop_age_days <= 0.89
+|   |   |   |   |   |--- num__temperature_C <= 0.98
+|   |   |   |   |   |   |--- value: [17.75]
+|   |   |   |   |   |--- num__temperature_C >  0.98
+|   |   |   |   |   |   |--- value: [198.43]
+|   |   |   |   |--- num__crop_age_days >  0.89
+|   |   |   |   |   |--- num__humidity_% <= 0.81
+|   |   |   |   |   |   |--- value: [50.34]
+|   |   |   |   |   |--- num__humidity_% >  0.81
+|   |   |   |   |   |   |--- value: [355.16]
+|   |   |--- cat__soil_type_Clayey >  0.50
+|   |   |   |--- num__rainfall_mm <= 0.02
+|   |   |   |   |--- num__temperature_C <= 0.17
+|   |   |   |   |   |--- cat__crop_name_Tomato <= 0.50
+|   |   |   |   |   |   |--- value: [0.00]
+|   |   |   |   |   |--- cat__crop_name_Tomato >  0.50
+|   |   |   |   |   |   |--- value: [274.33]
+|   |   |   |   |--- num__temperature_C >  0.17
+|   |   |   |   |   |--- num__crop_age_days <= 0.74
+|   |   |   |   |   |   |--- value: [308.59]
+|   |   |   |   |   |--- num__crop_age_days >  0.74
+|   |   |   |   |   |   |--- value: [539.64]
+|   |   |   |--- num__rainfall_mm >  0.02
+|   |   |   |   |--- num__rainfall_mm <= 0.04
+|   |   |   |   |   |--- num__humidity_% <= 0.28
+|   |   |   |   |   |   |--- value: [184.16]
+|   |   |   |   |   |--- num__humidity_% >  0.28
+|   |   |   |   |   |   |--- value: [67.97]
+|   |   |   |   |--- num__rainfall_mm >  0.04
+|   |   |   |   |   |--- num__rainfall_mm <= 0.07
+|   |   |   |   |   |   |--- value: [296.67]
+|   |   |   |   |   |--- num__rainfall_mm >  0.07
+|   |   |   |   |   |   |--- value: [180.28]
+|   |--- num__soil_moisture_% >  0.66
+|   |   |--- num__soil_moisture_% <= 0.74
+|   |   |   |--- cat__soil_type_Clayey <= 0.50
+|   |   |   |   |--- num__rainfall_mm <= 0.00
+|   |   |   |   |   |--- num__rainfall_mm <= 0.00
+|   |   |   |   |   |   |--- value: [0.00]
+|   |   |   |   |   |--- num__rainfall_mm >  0.00
+|   |   |   |   |   |   |--- value: [27.16]
+|   |   |   |   |--- num__rainfall_mm >  0.00
+|   |   |   |   |   |--- num__soil_moisture_% <= 0.74
+|   |   |   |   |   |   |--- value: [1.67]
+|   |   |   |   |   |--- num__soil_moisture_% >  0.74
+|   |   |   |   |   |   |--- value: [18.17]
+|   |   |   |--- cat__soil_type_Clayey >  0.50
+|   |   |   |   |--- num__rainfall_mm <= 0.03
+|   |   |   |   |   |--- num__rainfall_mm <= 0.02
+|   |   |   |   |   |   |--- value: [117.56]
+|   |   |   |   |   |--- num__rainfall_mm >  0.02
+|   |   |   |   |   |   |--- value: [466.60]
+|   |   |   |   |--- num__rainfall_mm >  0.03
+|   |   |   |   |   |--- num__crop_age_days <= 0.41
+|   |   |   |   |   |   |--- value: [101.37]
+|   |   |   |   |   |--- num__crop_age_days >  0.41
+|   |   |   |   |   |   |--- value: [31.65]
+|   |   |--- num__soil_moisture_% >  0.74
+|   |   |   |--- num__soil_moisture_% <= 0.78
+|   |   |   |   |--- num__soil_moisture_% <= 0.78
+|   |   |   |   |   |--- num__soil_moisture_% <= 0.78
+|   |   |   |   |   |   |--- value: [10.40]
+|   |   |   |   |   |--- num__soil_moisture_% >  0.78
+|   |   |   |   |   |   |--- value: [69.01]
+|   |   |   |   |--- num__soil_moisture_% >  0.78
+|   |   |   |   |   |--- value: [228.53]
+|   |   |   |--- num__soil_moisture_% >  0.78
+|   |   |   |   |--- num__soil_moisture_% <= 0.96
+|   |   |   |   |   |--- num__rainfall_mm <= 0.01
+|   |   |   |   |   |   |--- value: [3.22]
+|   |   |   |   |   |--- num__rainfall_mm >  0.01
+|   |   |   |   |   |   |--- value: [1.05]
+|   |   |   |   |--- num__soil_moisture_% >  0.96
+|   |   |   |   |   |--- num__crop_age_days <= 0.42
+|   |   |   |   |   |   |--- value: [0.00]
+|   |   |   |   |   |--- num__crop_age_days >  0.42
+|   |   |   |   |   |   |--- value: [21.99]
+
