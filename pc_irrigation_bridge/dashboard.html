@@ -83,9 +83,9 @@ code{font-size:.85em}
 </div>
 </div>
 
-<h2 class="sec">Journal CSV (sur le PC)</h2>
+<h2 class="sec">Journal CSV</h2>
 <div class="chart-panel">
-<p class="sub" style="margin:0 0 .75rem">Fichier local <code>data/irrigation_log.csv</code> (mise a jour automatique).</p>
+<p class="sub" style="margin:0 0 .75rem">Export genere depuis la <strong>base Supabase</strong> a chaque clic (historique MQTT complet).</p>
 <button type="button" class="secondary" id="btn_dl_csv">Télécharger irrigation_log.csv</button>
 <p id="csv_dl_msg" class="sub" style="margin-top:.5rem"></p>
 </div>
@@ -203,17 +203,26 @@ document.getElementById("f").onsubmit=async (e)=>{
 };
 document.getElementById("btn_dl_csv").onclick=async function(){
   const msg=document.getElementById("csv_dl_msg");
-  msg.textContent="Preparation…";
+  msg.textContent="Generation depuis la base…";
   const u=window.location.origin+"/api/irrigation_log.csv";
   try{
-    const r=await fetch(u);
+    const r=await fetch(u,{cache:"no-store"});
+    const ct=(r.headers.get("Content-Type")||"").toLowerCase();
     if(!r.ok){
       let t="";
       try{t=await r.text();}catch(_){}
+      try{const j=JSON.parse(t); if(j&&j.error) t=j.error;}catch(_){}
       msg.textContent="Erreur "+r.status+(t?": "+t:"");
       return;
     }
+    if(!ct.includes("text/csv")){
+      const t=await r.text();
+      msg.textContent="Reponse inattendue (pas un CSV). Verifiez DATABASE_URL sur Render.";
+      return;
+    }
     const blob=await r.blob();
+    const n=r.headers.get("X-CSV-Rows");
+    const src=r.headers.get("X-CSV-Source")||"database";
     const a=document.createElement("a");
     a.href=URL.createObjectURL(blob);
     a.download="irrigation_log.csv";
@@ -221,7 +230,8 @@ document.getElementById("btn_dl_csv").onclick=async function(){
     a.click();
     a.remove();
     URL.revokeObjectURL(a.href);
-    msg.textContent="Telechargement lance.";
+    const rows=n!==null&&n!==""?parseInt(n,10):null;
+    msg.textContent="Telechargement lance (source: "+src+(Number.isFinite(rows)?", "+rows+" lignes de donnees":"")+", en-tete inclus).";
   }catch(e){
     msg.textContent="Echec reseau : "+(e&&e.message?e.message:String(e));
   }

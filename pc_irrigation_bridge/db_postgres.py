@@ -15,13 +15,24 @@ from db_mysql import TelemetryData, telemetry_to_csv_row
 _IDENTIFIER_SAFE = re.compile(r"^[A-Za-z0-9_]{1,64}$")
 
 
+def normalize_database_url(url: str) -> str:
+    """Supabase exige SSL ; ajoute sslmode=require si absent."""
+    u = url.strip()
+    if not u:
+        return u
+    if "sslmode=" in u.lower():
+        return u
+    sep = "&" if "?" in u else "?"
+    return f"{u}{sep}sslmode=require"
+
+
 class PostgresStore:
     def __init__(self, database_url: str, table: str = "irrigation_telemetry", device_id: str = "station01") -> None:
         if not database_url.strip():
             raise ValueError("DATABASE_URL vide")
         if not _IDENTIFIER_SAFE.match(table):
             raise ValueError(f"Nom de table invalide: {table!r}")
-        self._database_url = database_url.strip()
+        self._database_url = normalize_database_url(database_url)
         self._table = table
         self._device_id = device_id[:64]
 

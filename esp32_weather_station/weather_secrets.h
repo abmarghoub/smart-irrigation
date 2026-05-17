@@ -54,7 +54,7 @@
 #define MQTT_USER "irrigation_station01"
 #endif
 #ifndef MQTT_PASSWORD
-#define MQTT_PASSWORD "REMPLACER_PAR_MOT_DE_PASSE_HIVEMQ"
+#define MQTT_PASSWORD "12345marghoub#A"
 #endif
 
 #endif

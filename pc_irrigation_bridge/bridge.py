@@ -51,6 +51,7 @@ _pg_store: PostgresStore | None = None
 _mysql_store: MySQLStore | None = None
 _bootstrap_lock = threading.Lock()
 _bootstrapped = False
+_bootstrap_notes: list[str] = []
 
 
 def _env(key: str, default: str = "") -> str:
@@ -201,9 +202,31 @@ def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage
         print("[bridge] ecriture CSV locale:", e)
 
 
-def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client:
+def _mqtt_configured() -> bool:
+    return bool(_env("MQTT_HOST") or _env("MQTT_BROKER_HOST"))
+
+
+def _wait_mqtt_connected(client: mqtt.Client, timeout_s: float = 12.0) -> bool:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            if client.is_connected():
+                return True
+        except Exception:
+            pass
+        time.sleep(0.25)
+    return False
+
+
+def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client | None:
     global _mqtt_client, _args_ns
     _args_ns = ns
+
+    if not _mqtt_configured():
+        msg = "MQTT ignore: definissez MQTT_HOST sur Render (HiveMQ)."
+        print(f"[bridge] {msg}")
+        _bootstrap_notes.append(msg)
+        return None
 
     def on_connect(client: mqtt.Client, _userdata: Any, _flags: Any, rc: int) -> None:
         if rc == 0:
@@ -211,6 +234,7 @@ def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client:
             print(f"[MQTT] connecte, abonne a {ns.topic_telemetry!r}")
         else:
             print(f"[MQTT] connexion refusee, code {rc}")
+            _bootstrap_notes.append(f"MQTT on_connect rc={rc}")
 
     cid = f"{ns.mqtt_client_id}_{int(time.time()) % 100000}"
     client = mqtt.Client(client_id=cid)
@@ -220,8 +244,18 @@ def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client:
         client.username_pw_set(ns.mqtt_user, ns.mqtt_password or None)
     if ns.mqtt_tls:
         client.tls_set(cert_reqs=ssl.CERT_REQUIRED, tls_version=ssl.PROTOCOL_TLS_CLIENT)
-    client.connect(ns.mqtt_host, ns.mqtt_port, keepalive=30)
+    try:
+        client.connect(ns.mqtt_host, ns.mqtt_port, keepalive=60)
+    except Exception as e:
+        msg = f"MQTT connect exception: {e}"
+        print(f"[bridge] {msg}")
+        _bootstrap_notes.append(msg)
+        return None
     client.loop_start()
+    if not _wait_mqtt_connected(client):
+        msg = f"MQTT timeout vers {ns.mqtt_host}:{ns.mqtt_port} (verifier MQTT_USER/PASSWORD)"
+        print(f"[bridge] {msg}")
+        _bootstrap_notes.append(msg)
     _mqtt_client = client
     return client
 
@@ -237,8 +271,12 @@ def _init_storage(ns: argparse.Namespace) -> None:
                 _pg_store.ensure_table()
                 print(f"[bridge] Postgres pret : table `{ns.pg_table}` device={ns.device_id!r}")
         except Exception as e:
-            print("[bridge] Postgres desactive:", e)
+            msg = f"Postgres: {e}"
+            print(f"[bridge] {msg}")
+            _bootstrap_notes.append(msg)
             _pg_store = None
+    elif not _env("DATABASE_URL"):
+        _bootstrap_notes.append("DATABASE_URL non defini sur Render.")
 
     _mysql_store = None
     if not ns.no_mysql and _env("MYSQL_HOST"):
@@ -275,17 +313,38 @@ def bootstrap(argv: list[str] | None = None) -> argparse.Namespace:
         return ns
 
 
+def _get_pg_store() -> PostgresStore | None:
+    """Store Postgres (Supabase), avec reconnexion si le bootstrap initial a echoue."""
+    global _pg_store
+    if _pg_store is not None:
+        return _pg_store
+    if not _env("DATABASE_URL"):
+        return None
+    try:
+        _pg_store = postgres_store_from_env()
+        if _pg_store is not None:
+            _pg_store.ensure_table()
+    except Exception as e:
+        print("[bridge] Postgres (lazy):", e)
+        _pg_store = None
+    return _pg_store
+
+
 @app.route("/api/irrigation_log.csv", methods=["GET"])
 def api_irrigation_log_csv() -> Any:
-    if _pg_store is not None:
+    store = _get_pg_store()
+    if store is not None:
         try:
-            rows = _pg_store.fetch_all_csv_rows(CSV_HEADER)
-            return _csv_response_from_rows(rows)
+            rows = store.fetch_all_csv_rows(CSV_HEADER)
+            resp = _csv_response_from_rows(rows)
+            resp.headers["X-CSV-Source"] = "database"
+            resp.headers["X-CSV-Rows"] = str(len(rows))
+            return resp
         except Exception as e:
             return jsonify({"error": f"Lecture base: {e}"}), 500
 
     if not _args_ns:
-        return jsonify({"error": "Pont non initialise"}), 503
+        return jsonify({"error": "Pont non initialise (DATABASE_URL manquant ?)"}), 503
     path = Path(_args_ns.csv_path).resolve()
     if not path.is_file():
         return jsonify({"error": "Fichier CSV introuvable"}), 404
@@ -324,13 +383,37 @@ def api_state() -> Any:
 
 @app.route("/api/health", methods=["GET"])
 def api_health() -> Any:
+    global _bootstrapped
+    if not _bootstrapped:
+        try:
+            bootstrap([])
+        except Exception as e:
+            _bootstrap_notes.append(f"bootstrap: {e}")
+
+    pg = _get_pg_store()
     mqtt_ok = False
     if _mqtt_client is not None:
         try:
             mqtt_ok = bool(_mqtt_client.is_connected())
         except Exception:
             mqtt_ok = False
-    return jsonify({"ok": True, "mqtt": mqtt_ok, "postgres": _pg_store is not None})
+
+    ns = _args_ns
+    return jsonify(
+        {
+            "ok": True,
+            "mqtt": mqtt_ok,
+            "postgres": pg is not None,
+            "env": {
+                "DATABASE_URL": bool(_env("DATABASE_URL")),
+                "MQTT_HOST": bool(_env("MQTT_HOST") or _env("MQTT_BROKER_HOST")),
+                "MQTT_USER": bool(_env("MQTT_USER")),
+                "DEVICE_ID": _env("DEVICE_ID", "station01"),
+            },
+            "mqtt_target": f"{ns.mqtt_host}:{ns.mqtt_port}" if ns else "",
+            "notes": _bootstrap_notes[-5:],
+        }
+    )
 
 
 @app.route("/api/manual", methods=["POST"])
@@ -354,11 +437,11 @@ def main() -> None:
 
 # Gunicorn (Render) importe ce module : ne pas lire sys.argv (contient "bridge:app", --bind, etc.)
 if __name__ != "__main__":
-    if _env("MQTT_HOST") or _env("MQTT_BROKER_HOST") or _env("DATABASE_URL"):
-        try:
-            bootstrap([])
-        except Exception as e:
-            print("[bridge] bootstrap au chargement:", e)
+    try:
+        bootstrap([])
+    except Exception as e:
+        print("[bridge] bootstrap au chargement:", e)
+        _bootstrap_notes.append(f"bootstrap import: {e}")
 
 
 if __name__ == "__main__":
