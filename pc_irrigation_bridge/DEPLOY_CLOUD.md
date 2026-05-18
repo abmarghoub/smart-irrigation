@@ -62,4 +62,5 @@ Premier acces apres inactivite : Render free peut mettre ~1 min a demarrer.
 | MQTT `rc=-2` (ESP) | WiFi sans Internet, mauvais host/port, ou auth |
 | `postgres: false` | `DATABASE_URL` invalide (encoder `#` en `%23`) |
 | Dashboard vide | ESP non connecte ou topics differents Render/ESP |
+| ESP `Heartbeat OK` mais `mqtt_rx_count: 0` | HiveMQ : **Subscribe** sur `irrigation/station01/telemetry` ; `git push` bridge ; health → `mqtt_loopback_ok: true` |
 | CSV vide | Attendre des messages MQTT avec saisie manuelle confirmee |

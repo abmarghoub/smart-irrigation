@@ -58,11 +58,26 @@ _mqtt_rx_count: int = 0
 _last_mqtt_resubscribe_at: int = 0
 _last_mqtt_loopback_at: int = 0
 _last_mqtt_loopback_try_at: int = 0
+_last_mqtt_restart_at: int = 0
 _mqtt_sub_errors: list[str] = []
+_mqtt_sub_ok: list[str] = []
+_mqtt_thread: threading.Thread | None = None
 
 
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
+
+
+def _sanitize_mqtt_host(host: str) -> str:
+    h = host.strip()
+    for prefix in ("mqtts://", "mqtt://", "https://", "http://"):
+        if h.lower().startswith(prefix):
+            h = h[len(prefix) :]
+    if "/" in h:
+        h = h.split("/")[0]
+    if ":" in h:
+        h = h.rsplit(":", 1)[0]
+    return h.strip()
 
 
 def _env_int(key: str, default: int) -> int:
@@ -96,7 +111,8 @@ def build_namespace(argv: list[str] | None = None) -> argparse.Namespace:
     mqtt_tls = _env_bool("MQTT_TLS", mqtt_port == 8883)
 
     p = argparse.ArgumentParser(description="Dashboard irrigation via MQTT + Postgres/CSV")
-    p.add_argument("--mqtt-host", default=_env("MQTT_HOST") or _env("MQTT_BROKER_HOST") or "127.0.0.1")
+    raw_host = _env("MQTT_HOST") or _env("MQTT_BROKER_HOST") or "127.0.0.1"
+    p.add_argument("--mqtt-host", default=_sanitize_mqtt_host(raw_host))
     p.add_argument("--mqtt-port", type=int, default=mqtt_port)
     p.add_argument("--mqtt-user", default=_env("MQTT_USER"))
     p.add_argument("--mqtt-password", default=_env("MQTT_PASSWORD"))
@@ -188,11 +204,9 @@ def _is_telemetry_topic(topic: str) -> bool:
 
 
 def _mqtt_subscribe_all(client: mqtt.Client, ns: argparse.Namespace) -> None:
+    """Topics exacts seulement (HiveMQ refuse souvent les wildcards + et #)."""
     topics: list[tuple[str, int]] = [
         (ns.topic_telemetry, 0),
-        ("irrigation/+/telemetry", 0),
-        (ns.topic_command, 1),
-        (f"irrigation/{ns.device_id}/#", 0),
     ]
     legacy = _env("MQTT_TOPIC_COMMAND_LEGACY", "irrigation/command/manual")
     if legacy and legacy not in (ns.topic_command,):
@@ -291,12 +305,43 @@ def _mqtt_try_loopback() -> bool:
     if info.rc != mqtt.MQTT_ERR_SUCCESS:
         return False
     _last_mqtt_loopback_try_at = int(time.time())
-    deadline = time.time() + 5.0
+    deadline = time.time() + 8.0
     while time.time() < deadline:
-        _mqtt_client.loop(timeout=0.2)
+        time.sleep(0.2)
         if _last_mqtt_loopback_at >= _last_mqtt_loopback_try_at:
             return True
     return False
+
+
+def _mqtt_stop() -> None:
+    global _mqtt_client, _mqtt_thread
+    if _mqtt_client is not None:
+        try:
+            _mqtt_client.disconnect()
+        except Exception:
+            pass
+        try:
+            _mqtt_client.loop_stop()
+        except Exception:
+            pass
+        _mqtt_client = None
+    _mqtt_thread = None
+
+
+def _mqtt_loop_forever(client: mqtt.Client) -> None:
+    try:
+        client.loop_forever(retry_first_connection=True)
+    except Exception as e:
+        print("[MQTT] loop_forever termine:", e)
+
+
+def _mqtt_restart(ns: argparse.Namespace) -> mqtt.Client | None:
+    global _last_mqtt_restart_at
+    _last_mqtt_restart_at = int(time.time())
+    print("[MQTT] redemarrage client...")
+    _mqtt_stop()
+    time.sleep(0.5)
+    return _start_mqtt(ns)
 
 
 def _wait_mqtt_connected(client: mqtt.Client, timeout_s: float = 12.0) -> bool:
@@ -312,7 +357,7 @@ def _wait_mqtt_connected(client: mqtt.Client, timeout_s: float = 12.0) -> bool:
 
 
 def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client | None:
-    global _mqtt_client, _args_ns
+    global _mqtt_client, _args_ns, _mqtt_thread
     _args_ns = ns
 
     if not _mqtt_configured():
@@ -330,7 +375,7 @@ def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client | None:
             _bootstrap_notes.append(f"MQTT on_connect rc={rc}")
 
     def on_subscribe(_client: mqtt.Client, _userdata: Any, mid: int, granted_qos: list[int]) -> None:
-        global _mqtt_sub_errors
+        global _mqtt_sub_errors, _mqtt_sub_ok
         print(f"[MQTT] on_subscribe mid={mid} qos={granted_qos}")
         for q in granted_qos:
             if q == 0x80:
@@ -339,9 +384,13 @@ def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client | None:
                 _mqtt_sub_errors.append(err)
                 if len(_mqtt_sub_errors) > 10:
                     del _mqtt_sub_errors[0]
+            else:
+                _mqtt_sub_ok.append(f"mid={mid} qos={q}")
+                if len(_mqtt_sub_ok) > 10:
+                    del _mqtt_sub_ok[0]
 
     cid = f"{ns.mqtt_client_id}_{int(time.time()) % 100000}"
-    client = mqtt.Client(client_id=cid)
+    client = mqtt.Client(client_id=cid, clean_session=True)
     client.on_connect = on_connect
     client.on_subscribe = on_subscribe
     client.on_message = _on_mqtt_message
@@ -356,7 +405,13 @@ def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client | None:
         print(f"[bridge] {msg}")
         _bootstrap_notes.append(msg)
         return None
-    client.loop_start()
+    _mqtt_thread = threading.Thread(
+        target=_mqtt_loop_forever,
+        args=(client,),
+        daemon=True,
+        name="mqtt-loop",
+    )
+    _mqtt_thread.start()
     if not _wait_mqtt_connected(client):
         msg = f"MQTT timeout vers {ns.mqtt_host}:{ns.mqtt_port} (verifier MQTT_USER/PASSWORD)"
         print(f"[bridge] {msg}")
@@ -507,29 +562,34 @@ def api_health() -> Any:
     now = int(time.time())
     loopback_ok = _last_mqtt_loopback_at > 0
     if mqtt_ok and _mqtt_client is not None and ns and _last_mqtt_rx_at == 0:
-        global _last_mqtt_resubscribe_at, _last_mqtt_loopback_try_at
-        if now - _last_mqtt_resubscribe_at >= 60:
+        global _last_mqtt_resubscribe_at, _last_mqtt_loopback_try_at, _last_mqtt_restart_at
+        if now - _last_mqtt_resubscribe_at >= 45:
             _last_mqtt_resubscribe_at = now
             try:
                 _mqtt_subscribe_all(_mqtt_client, ns)
-                print("[MQTT] re-abonnement (aucune telemetry recue encore)")
+                print("[MQTT] re-abonnement telemetry")
             except Exception as e:
                 print("[MQTT] re-abonnement echoue:", e)
-        if _last_mqtt_loopback_try_at == 0 or now - _last_mqtt_loopback_try_at >= 120:
+        if _last_mqtt_loopback_try_at == 0 or now - _last_mqtt_loopback_try_at >= 90:
             loopback_ok = _mqtt_try_loopback() or (_last_mqtt_loopback_at > 0)
+        if not loopback_ok and (now - _last_mqtt_restart_at >= 120 or _last_mqtt_restart_at == 0):
+            _mqtt_restart(ns)
+            mqtt_ok = bool(_mqtt_client and _mqtt_client.is_connected())
+            if _last_mqtt_loopback_try_at == 0 or now - _last_mqtt_loopback_try_at >= 90:
+                loopback_ok = _mqtt_try_loopback() or (_last_mqtt_loopback_at > 0)
 
     rx_hint = ""
     if mqtt_ok and _last_mqtt_rx_at == 0:
         if loopback_ok:
             rx_hint = (
-                "Render recoit bien MQTT (test loopback OK) mais pas l'ESP. "
-                "Re-flashez l'ESP, verifiez MQTT_PASSWORD identique Render/weather_secrets.h, "
-                "serie: [MQTT] OK publie ... -> irrigation/station01/telemetry"
+                "Render recoit MQTT (loopback OK) mais pas encore l'ESP — attendez le prochain "
+                "[MQTT] OK publie ou redemarrez l'ESP."
             )
         else:
             rx_hint = (
-                "Render connecte a HiveMQ mais aucun message telemetry (ESP ou abonnement). "
-                "Verifiez permissions HiveMQ irrigation/# et moniteur serie ESP."
+                "Render connecte a HiveMQ mais n'ecoute pas la telemetry (abonnement). "
+                "HiveMQ: autoriser SUBSCRIBE sur irrigation/station01/telemetry pour le meme "
+                "utilisateur que l'ESP. Puis redeployez le bridge (git push)."
             )
     elif _last_mqtt_rx_at > 0:
         rx_hint = f"Derniere telemetrie il y a {now - _last_mqtt_rx_at}s."
@@ -548,6 +608,8 @@ def api_health() -> Any:
             },
             "mqtt_loopback_ok": loopback_ok,
             "mqtt_sub_errors": _mqtt_sub_errors[-3:],
+            "mqtt_sub_ok": _mqtt_sub_ok[-3:],
+            "mqtt_user": (_env("MQTT_USER")[:20] + "...") if len(_env("MQTT_USER")) > 20 else _env("MQTT_USER"),
             "mqtt_target": f"{ns.mqtt_host}:{ns.mqtt_port}" if ns else "",
             "topic_telemetry": ns.topic_telemetry if ns else "",
             "topic_command": ns.topic_command if ns else "",
@@ -589,7 +651,7 @@ def _mqtt_publish_one(topic: str, body: str, qos: int) -> dict[str, Any]:
 
     deadline = time.time() + 10.0
     while time.time() < deadline:
-        _mqtt_client.loop(timeout=0.15)
+        time.sleep(0.1)
         if qos == 0:
             published = True
             break
