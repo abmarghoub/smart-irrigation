@@ -24,6 +24,8 @@ static PubSubClient s_mqtt(s_wifi_mqtt);
 static char s_payload[1400];
 static char s_rx_cmd[512];
 static uint32_t s_last_reconnect_ms;
+static uint32_t s_last_publish_skip_log_ms;
+static uint32_t s_last_publish_ok_log_ms;
 
 static const char* kCropNames[] = {"Maize", "Rice", "Tomato", "Wheat"};
 static const char* kSoilNames[] = {"Clayey", "Loamy", "Sandy", "Silty"};
@@ -216,7 +218,14 @@ void mqtt_irrigation_publish_state(
     float dose_d,
     float dose_t) {
   if (strlen(MQTT_BROKER_HOST) == 0) return;
-  if (!s_mqtt.connected()) return;
+  if (!s_mqtt.connected()) {
+    uint32_t ms = millis();
+    if (ms - s_last_publish_skip_log_ms >= 30000UL) {
+      s_last_publish_skip_log_ms = ms;
+      Serial.println(F("[MQTT] Telemetrie non envoyee: MQTT deconnecte (WiFi OK mais pas HiveMQ)."));
+    }
+    return;
+  }
 
   auto jf = [](float v) { return (isnan(v) || isinf(v)) ? 0.f : v; };
 
@@ -289,6 +298,13 @@ void mqtt_irrigation_publish_state(
   s_payload[n] = '\0';
   if (!s_mqtt.publish(MQTT_TOPIC_TELEMETRY, s_payload, true)) {
     Serial.println(F("[MQTT] publish telemetry echoue"));
+    return;
+  }
+  uint32_t ms = millis();
+  if (ms - s_last_publish_ok_log_ms >= 60000UL) {
+    s_last_publish_ok_log_ms = ms;
+    Serial.print(F("[MQTT] Telemetrie publiee sur "));
+    Serial.println(MQTT_TOPIC_TELEMETRY);
   }
 }
 

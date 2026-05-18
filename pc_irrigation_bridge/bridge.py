@@ -54,6 +54,8 @@ _bootstrapped = False
 _bootstrap_notes: list[str] = []
 _last_manual_publish: dict[str, Any] = {}
 _last_mqtt_rx_at: int = 0
+_mqtt_rx_count: int = 0
+_last_mqtt_resubscribe_at: int = 0
 
 
 def _env(key: str, default: str = "") -> str:
@@ -172,14 +174,50 @@ def _csv_response_from_rows(rows: list[list[Any]]) -> Response:
     )
 
 
+def _is_telemetry_topic(topic: str) -> bool:
+    if not topic:
+        return False
+    if topic.endswith("/telemetry"):
+        return True
+    if _args_ns and topic == _args_ns.topic_telemetry:
+        return True
+    return False
+
+
+def _mqtt_subscribe_all(client: mqtt.Client, ns: argparse.Namespace) -> None:
+    topics: list[tuple[str, int]] = [
+        (ns.topic_telemetry, 0),
+        (ns.topic_command, 1),
+        (f"irrigation/{ns.device_id}/#", 0),
+    ]
+    legacy = _env("MQTT_TOPIC_COMMAND_LEGACY", "irrigation/command/manual")
+    if legacy and legacy not in (ns.topic_command,):
+        topics.append((legacy, 1))
+    seen: set[str] = set()
+    for topic, qos in topics:
+        if topic in seen:
+            continue
+        seen.add(topic)
+        client.subscribe(topic, qos=qos)
+    print(f"[MQTT] abonnements demandes: {sorted(seen)}")
+
+
 def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> None:
-    global _last_state
+    global _last_state, _last_mqtt_rx_at, _mqtt_rx_count
     if not _args_ns:
         return
     topic = msg.topic or ""
+    if _is_telemetry_topic(topic):
+        _last_mqtt_rx_at = int(time.time())
+        _mqtt_rx_count += 1
+        if _mqtt_rx_count <= 3 or _mqtt_rx_count % 30 == 0:
+            print(f"[MQTT] RX telemetry #{_mqtt_rx_count} topic={topic!r} len={len(msg.payload)}")
+
     try:
         payload = json.loads(msg.payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
+        if _is_telemetry_topic(topic):
+            print(f"[MQTT] telemetry JSON invalide sur {topic!r}")
         return
 
     if not isinstance(payload, dict):
@@ -190,11 +228,8 @@ def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage
     if topic in (_args_ns.topic_command, _env("MQTT_TOPIC_COMMAND_LEGACY", "irrigation/command/manual")):
         print(f"[MQTT] echo commande sur {topic!r}")
         return
-    if "sensors" not in payload:
+    if not _is_telemetry_topic(topic) or "sensors" not in payload:
         return
-
-    global _last_mqtt_rx_at
-    _last_mqtt_rx_at = int(time.time())
     with _state_lock:
         _last_state = payload
 
@@ -246,16 +281,19 @@ def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client | None:
 
     def on_connect(client: mqtt.Client, _userdata: Any, _flags: Any, rc: int) -> None:
         if rc == 0:
-            client.subscribe(ns.topic_telemetry, qos=0)
-            client.subscribe(ns.topic_command, qos=1)
-            print(f"[MQTT] connecte, abonne a {ns.topic_telemetry!r} et {ns.topic_command!r}")
+            _mqtt_subscribe_all(client, ns)
+            print(f"[MQTT] connecte broker {ns.mqtt_host}:{ns.mqtt_port}")
         else:
             print(f"[MQTT] connexion refusee, code {rc}")
             _bootstrap_notes.append(f"MQTT on_connect rc={rc}")
 
+    def on_subscribe(_client: mqtt.Client, _userdata: Any, mid: int, granted_qos: list[int]) -> None:
+        print(f"[MQTT] on_subscribe mid={mid} qos={granted_qos}")
+
     cid = f"{ns.mqtt_client_id}_{int(time.time()) % 100000}"
     client = mqtt.Client(client_id=cid)
     client.on_connect = on_connect
+    client.on_subscribe = on_subscribe
     client.on_message = _on_mqtt_message
     if ns.mqtt_user:
         client.username_pw_set(ns.mqtt_user, ns.mqtt_password or None)
@@ -416,6 +454,26 @@ def api_health() -> Any:
             mqtt_ok = False
 
     ns = _args_ns
+    now = int(time.time())
+    if mqtt_ok and _mqtt_client is not None and ns and _last_mqtt_rx_at == 0:
+        global _last_mqtt_resubscribe_at
+        if now - _last_mqtt_resubscribe_at >= 60:
+            _last_mqtt_resubscribe_at = now
+            try:
+                _mqtt_subscribe_all(_mqtt_client, ns)
+                print("[MQTT] re-abonnement (aucune telemetry recue encore)")
+            except Exception as e:
+                print("[MQTT] re-abonnement echoue:", e)
+
+    rx_hint = ""
+    if mqtt_ok and _last_mqtt_rx_at == 0:
+        rx_hint = (
+            "Render connecte a HiveMQ mais aucune telemetrie ESP recue. "
+            "Verifiez moniteur serie: [MQTT] Telemetrie publiee... ou MQTT deconnecte."
+        )
+    elif _last_mqtt_rx_at > 0:
+        rx_hint = f"Derniere telemetrie il y a {now - _last_mqtt_rx_at}s."
+
     return jsonify(
         {
             "ok": True,
@@ -433,6 +491,8 @@ def api_health() -> Any:
             "topic_command_legacy": _env("MQTT_TOPIC_COMMAND_LEGACY", "irrigation/command/manual"),
             "topic_relay": _relay_topic(ns) if ns else "",
             "last_mqtt_rx_at": _last_mqtt_rx_at,
+            "mqtt_rx_count": _mqtt_rx_count,
+            "mqtt_rx_hint": rx_hint,
             "last_manual_publish": _last_manual_publish,
             "notes": _bootstrap_notes[-5:],
         }

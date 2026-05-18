@@ -75,6 +75,7 @@ code{font-size:.85em}
 <div class="panel">
 <h2 style="margin:0 0 .75rem;font-size:1rem">Connexion</h2>
 <p id="ip" style="margin:.5rem 0 0;font-size:.9rem"></p>
+<p id="cloud_mqtt" style="margin:.25rem 0 0;font-size:.85rem;color:var(--muted)"></p>
 <div id="conn_block">
 <p id="conn_flow" style="margin:.35rem 0"></p>
 <p id="conn_manual" style="margin:.35rem 0"></p>
@@ -126,11 +127,28 @@ async function poll(){
   const base=window.location.origin;
   try{
     errEl.textContent="";
-    const r=await fetch(base+"/api/state",{cache:"no-store"});
+    const [r,rh]=await Promise.all([
+      fetch(base+"/api/state",{cache:"no-store"}),
+      fetch(base+"/api/health",{cache:"no-store"})
+    ]);
     if(!r.ok){ errEl.textContent="Erreur /api/state HTTP "+r.status; return; }
     const j=await readJson(r);
-    if(j.note&&!j.sensors){ errEl.textContent=j.note; }
-    document.getElementById("ip").innerHTML="IP (ESP32) : <strong>"+(j.ip||"—")+"</strong>"+(j.wifi_connected?" ✓":" (WiFi ESP deconnecte)");
+    let h={};
+    if(rh.ok){ try{ h=await readJson(rh); }catch(_e){} }
+    const cloudEl=document.getElementById("cloud_mqtt");
+    if(h.mqtt_rx_hint){ cloudEl.textContent=h.mqtt_rx_hint; }
+    else if(h.mqtt){ cloudEl.textContent="Cloud MQTT : connecte"; }
+  else { cloudEl.textContent=""; }
+    if(j.note&&!j.sensors){
+      errEl.textContent=j.note+(h.mqtt_rx_hint?" — "+h.mqtt_rx_hint:"");
+    }else{ errEl.textContent=h.mqtt_rx_hint&&h.last_mqtt_rx_at===0?h.mqtt_rx_hint:""; }
+    if(j.ip&&j.wifi_connected){
+      document.getElementById("ip").innerHTML="IP (ESP32) : <strong>"+j.ip+"</strong> ✓";
+    }else if(h.mqtt&&h.last_mqtt_rx_at===0){
+      document.getElementById("ip").innerHTML="IP (ESP32) : <strong>—</strong> <span style=color:var(--muted)>(pas encore de telemetrie cloud)</span>";
+    }else{
+      document.getElementById("ip").innerHTML="IP (ESP32) : <strong>"+(j.ip||"—")+"</strong>"+(j.wifi_connected?" ✓":" (WiFi ESP deconnecte)");
+    }
     document.getElementById("lastupd").textContent="Derniere mise a jour : "+new Date().toLocaleTimeString();
     const s=j.sensors||{},w=j.weather||{},m=j.model_inputs||{},d=j.decision||{};
     const pred=!!(d&&d.prediction_active);
