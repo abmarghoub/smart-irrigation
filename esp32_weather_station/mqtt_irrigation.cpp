@@ -28,23 +28,16 @@ static uint32_t s_last_reconnect_ms;
 static const char* kCropNames[] = {"Maize", "Rice", "Tomato", "Wheat"};
 static const char* kSoilNames[] = {"Clayey", "Loamy", "Sandy", "Silty"};
 
-static void mqtt_on_message(char* topic, byte* payload, unsigned int length) {
-  Serial.print(F("[MQTT] RX topic="));
-  Serial.println(topic);
-  if (length >= sizeof(s_rx_cmd)) length = sizeof(s_rx_cmd) - 1;
-  memcpy(s_rx_cmd, payload, length);
-  s_rx_cmd[length] = '\0';
-
-  StaticJsonDocument<256> doc;
-  DeserializationError err = deserializeJson(doc, s_rx_cmd);
-  if (err) {
-    Serial.print(F("[MQTT] JSON commande invalide: "));
-    Serial.println(err.c_str());
-    return;
+static bool mqtt_apply_manual_json(StaticJsonDocument<256>& doc, const char* via) {
+  const char* cmd = doc["cmd"] | "";
+  bool is_relay = (cmd && strcmp(cmd, "manual") == 0);
+  if (!is_relay && doc.containsKey("sensors")) {
+    return false;
   }
   int age = doc["crop_age_days"] | 0;
   int ci = doc["crop_idx"] | 0;
   int si = doc["soil_idx"] | 0;
+  if (age < 1 && !is_relay) return false;
   if (age < 1) age = 1;
   if (age > 120) age = 120;
   if (ci < 0) ci = 0;
@@ -55,7 +48,9 @@ static void mqtt_on_message(char* topic, byte* payload, unsigned int length) {
   g_crop_idx = ci;
   g_soil_idx = si;
   g_manual_ready = true;
-  Serial.println(F("[MQTT] Saisie manuelle appliquee (topic commande)."));
+  Serial.print(F("[MQTT] Saisie manuelle appliquee ("));
+  Serial.print(via);
+  Serial.println(F(")."));
   Serial.print(F("  age_jours="));
   Serial.println(g_crop_age_days);
   Serial.print(F("  culture="));
@@ -69,6 +64,24 @@ static void mqtt_on_message(char* topic, byte* payload, unsigned int length) {
   Serial.print(g_soil_idx);
   Serial.println(F(")"));
   irrigation_request_sensor_cycle();
+  return true;
+}
+
+static void mqtt_on_message(char* topic, byte* payload, unsigned int length) {
+  Serial.print(F("[MQTT] RX topic="));
+  Serial.println(topic);
+  if (length >= sizeof(s_rx_cmd)) length = sizeof(s_rx_cmd) - 1;
+  memcpy(s_rx_cmd, payload, length);
+  s_rx_cmd[length] = '\0';
+
+  StaticJsonDocument<256> doc;
+  DeserializationError err = deserializeJson(doc, s_rx_cmd);
+  if (err) {
+    Serial.print(F("[MQTT] JSON invalide: "));
+    Serial.println(err.c_str());
+    return;
+  }
+  if (mqtt_apply_manual_json(doc, "commande")) return;
 }
 
 static void mqtt_print_rc_hint(int rc) {
@@ -130,6 +143,10 @@ static bool mqtt_connect() {
       Serial.print(F("[MQTT] Abonne (legacy) "));
       Serial.println(legacy_cmd);
     }
+  }
+  if (s_mqtt.subscribe(MQTT_TOPIC_TELEMETRY)) {
+    Serial.print(F("[MQTT] Abonne (relay) "));
+    Serial.println(MQTT_TOPIC_TELEMETRY);
   }
   return true;
 }

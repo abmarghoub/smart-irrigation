@@ -202,7 +202,8 @@ document.getElementById("f").onsubmit=async (e)=>{
     const t=await r.json();
     if(r.ok&&t&&t.ok){
       const tops=(t.topics||[]).map(x=>x.topic+(x.published?" OK":" ECHEC")).join(", ");
-      msg.textContent="MQTT: "+(tops||"envoye")+". Attendez ~5 s — moniteur ESP doit afficher [MQTT] Saisie manuelle appliquee.";
+      const via=t.via?(" via "+t.via):"";
+      msg.textContent="MQTT"+via+": "+(tops||"envoye")+". Attendez ~5 s — moniteur ESP : [MQTT] Saisie manuelle appliquee.";
       setTimeout(poll,1500);
       setTimeout(poll,5000);
     }else{

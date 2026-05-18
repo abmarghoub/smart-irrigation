@@ -176,12 +176,20 @@ def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage
     if not _args_ns:
         return
     topic = msg.topic or ""
-    if topic == _args_ns.topic_command:
-        print(f"[MQTT] echo commande recu sur {topic!r} ({len(msg.payload)} octets)")
-        return
     try:
         payload = json.loads(msg.payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
+        return
+
+    if not isinstance(payload, dict):
+        return
+    if payload.get("cmd") == "manual":
+        print(f"[MQTT] ignore relay manuel sur {topic!r}")
+        return
+    if topic in (_args_ns.topic_command, _env("MQTT_TOPIC_COMMAND_LEGACY", "irrigation/command/manual")):
+        print(f"[MQTT] echo commande sur {topic!r}")
+        return
+    if "sensors" not in payload:
         return
 
     with _state_lock:
@@ -435,36 +443,57 @@ def _command_topics(ns: argparse.Namespace) -> list[str]:
     return topics
 
 
-def _mqtt_publish_json(topics: list[str], body: str) -> list[dict[str, Any]]:
-    global _last_manual_publish
+def _mqtt_publish_one(topic: str, body: str, qos: int) -> dict[str, Any]:
+    """Publie avec boucle MQTT active (Render/gunicorn)."""
     if not _mqtt_client:
-        return []
-    out: list[dict[str, Any]] = []
-    for topic in topics:
-        info = _mqtt_client.publish(topic, body, qos=1, retain=False)
-        published = False
-        err = ""
-        if info.rc == mqtt.MQTT_ERR_SUCCESS:
-            try:
-                published = bool(info.wait_for_publish(timeout=8.0))
-            except Exception as e:
-                err = str(e)
-        out.append(
-            {
-                "topic": topic,
-                "mqtt_rc": int(info.rc),
-                "published": published,
-                "error": err,
-            }
-        )
-        print(f"[bridge] publish {topic!r} rc={info.rc} published={published} body={body}")
-    _last_manual_publish = {"body": body, "results": out, "at": int(time.time())}
-    return out
+        return {"topic": topic, "mqtt_rc": -1, "published": False, "qos": qos}
+    info = _mqtt_client.publish(topic, body, qos=qos, retain=False)
+    published = False
+    if info.rc != mqtt.MQTT_ERR_SUCCESS:
+        return {"topic": topic, "mqtt_rc": int(info.rc), "published": False, "qos": qos}
+
+    deadline = time.time() + 10.0
+    while time.time() < deadline:
+        _mqtt_client.loop(timeout=0.15)
+        if qos == 0:
+            published = True
+            break
+        if info.is_published():
+            published = True
+            break
+    return {"topic": topic, "mqtt_rc": int(info.rc), "published": published, "qos": qos}
+
+
+def _mqtt_publish_manual(age: int, ci: int, si: int) -> tuple[list[dict[str, Any]], str, str]:
+    global _last_manual_publish
+    assert _args_ns is not None
+    body_cmd = json.dumps({"crop_age_days": age, "crop_idx": ci, "soil_idx": si})
+    body_relay = json.dumps({"cmd": "manual", "crop_age_days": age, "crop_idx": ci, "soil_idx": si})
+    results: list[dict[str, Any]] = []
+
+    for topic in _command_topics(_args_ns):
+        r1 = _mqtt_publish_one(topic, body_cmd, qos=1)
+        results.append(r1)
+        if not r1.get("published"):
+            results.append(_mqtt_publish_one(topic, body_cmd, qos=0))
+
+    if not any(r.get("published") for r in results):
+        print("[bridge] command topics failed -> relay via telemetry")
+        results.append(_mqtt_publish_one(_args_ns.topic_telemetry, body_relay, qos=1))
+        if not results[-1].get("published"):
+            results.append(_mqtt_publish_one(_args_ns.topic_telemetry, body_relay, qos=0))
+
+    _last_manual_publish = {
+        "body_cmd": body_cmd,
+        "body_relay": body_relay,
+        "results": results,
+        "at": int(time.time()),
+    }
+    return results, body_cmd, body_relay
 
 
 @app.route("/api/manual", methods=["POST"])
 def api_manual() -> Any:
-    global _last_manual_publish
     if not _mqtt_client or not _args_ns:
         return jsonify({"ok": False, "error": "MQTT non initialise"}), 503
     if not _mqtt_client.is_connected():
@@ -479,16 +508,19 @@ def api_manual() -> Any:
         return jsonify({"ok": False, "error": "age doit etre entre 1 et 120"}), 400
     if ci < 0 or ci > 3 or si < 0 or si > 3:
         return jsonify({"ok": False, "error": "culture et sol : indices 0-3"}), 400
-    body = json.dumps({"crop_age_days": age, "crop_idx": ci, "soil_idx": si})
-    topics = _command_topics(_args_ns)
-    results = _mqtt_publish_json(topics, body)
-    ok = any(r.get("published") for r in results) or any(r.get("mqtt_rc") == 0 for r in results)
+
+    results, body_cmd, body_relay = _mqtt_publish_manual(age, ci, si)
+    ok = any(r.get("published") for r in results)
+    via = "relay-telemetry" if any(
+        r.get("published") and r.get("topic") == _args_ns.topic_telemetry for r in results
+    ) else "command"
     return jsonify(
         {
             "ok": bool(ok),
+            "via": via,
             "topics": results,
-            "payload": json.loads(body),
-            "hint": "Verifiez moniteur ESP : [MQTT] Saisie manuelle appliquee",
+            "payload": json.loads(body_cmd),
+            "hint": "Moniteur ESP : [MQTT] Saisie manuelle appliquee (commande ou relay)",
         }
     )
 
