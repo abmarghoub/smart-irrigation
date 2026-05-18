@@ -10,7 +10,7 @@
 | `MQTT_HOST` | `d5d4693246d54f46a43cefa118dea176.s1.eu.hivemq.cloud` |
 | `MQTT_PORT` | `8883` |
 | `MQTT_USER` | `irrigation_station01` |
-| `MQTT_PASSWORD` | *(mot de passe HiveMQ)* |
+| `MQTT_PASSWORD` | *(mot de passe HiveMQ — **identique** à `weather_secrets.h`, caractère `#` tel quel, pas `%23`)* |
 | `MQTT_TOPIC_TELEMETRY` | `irrigation/station01/telemetry` |
 | `MQTT_TOPIC_COMMAND` | `irrigation/station01/command/manual` |
 | `DEVICE_ID` | `station01` |

@@ -56,6 +56,9 @@ _last_manual_publish: dict[str, Any] = {}
 _last_mqtt_rx_at: int = 0
 _mqtt_rx_count: int = 0
 _last_mqtt_resubscribe_at: int = 0
+_last_mqtt_loopback_at: int = 0
+_last_mqtt_loopback_try_at: int = 0
+_mqtt_sub_errors: list[str] = []
 
 
 def _env(key: str, default: str = "") -> str:
@@ -223,6 +226,12 @@ def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage
 
     if not isinstance(payload, dict):
         return
+    if payload.get("_bridge_ping"):
+        global _last_mqtt_loopback_at, _last_mqtt_loopback_try_at
+        _last_mqtt_loopback_at = int(time.time())
+        _last_mqtt_loopback_try_at = 0
+        print(f"[MQTT] loopback OK sur {topic!r}")
+        return
     if payload.get("cmd") == "manual":
         print(f"[MQTT] ignore relay manuel sur {topic!r}")
         return
@@ -266,6 +275,30 @@ def _mqtt_configured() -> bool:
     return bool(_env("MQTT_HOST") or _env("MQTT_BROKER_HOST"))
 
 
+def _mqtt_try_loopback() -> bool:
+    """Publie un ping sur le topic telemetry pour verifier broker + abonnement Render."""
+    global _last_mqtt_loopback_try_at
+    if _mqtt_client is None or _args_ns is None:
+        return False
+    try:
+        if not _mqtt_client.is_connected():
+            return False
+    except Exception:
+        return False
+    topic = _args_ns.topic_telemetry
+    body = json.dumps({"_bridge_ping": 1, "t": int(time.time())})
+    info = _mqtt_client.publish(topic, body, qos=0, retain=False)
+    if info.rc != mqtt.MQTT_ERR_SUCCESS:
+        return False
+    _last_mqtt_loopback_try_at = int(time.time())
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        _mqtt_client.loop(timeout=0.2)
+        if _last_mqtt_loopback_at >= _last_mqtt_loopback_try_at:
+            return True
+    return False
+
+
 def _wait_mqtt_connected(client: mqtt.Client, timeout_s: float = 12.0) -> bool:
     deadline = time.time() + timeout_s
     while time.time() < deadline:
@@ -297,7 +330,15 @@ def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client | None:
             _bootstrap_notes.append(f"MQTT on_connect rc={rc}")
 
     def on_subscribe(_client: mqtt.Client, _userdata: Any, mid: int, granted_qos: list[int]) -> None:
+        global _mqtt_sub_errors
         print(f"[MQTT] on_subscribe mid={mid} qos={granted_qos}")
+        for q in granted_qos:
+            if q == 0x80:
+                err = f"abonnement refuse (ACL HiveMQ?) mid={mid}"
+                print(f"[MQTT] {err}")
+                _mqtt_sub_errors.append(err)
+                if len(_mqtt_sub_errors) > 10:
+                    del _mqtt_sub_errors[0]
 
     cid = f"{ns.mqtt_client_id}_{int(time.time()) % 100000}"
     client = mqtt.Client(client_id=cid)
@@ -464,8 +505,9 @@ def api_health() -> Any:
 
     ns = _args_ns
     now = int(time.time())
+    loopback_ok = _last_mqtt_loopback_at > 0
     if mqtt_ok and _mqtt_client is not None and ns and _last_mqtt_rx_at == 0:
-        global _last_mqtt_resubscribe_at
+        global _last_mqtt_resubscribe_at, _last_mqtt_loopback_try_at
         if now - _last_mqtt_resubscribe_at >= 60:
             _last_mqtt_resubscribe_at = now
             try:
@@ -473,13 +515,22 @@ def api_health() -> Any:
                 print("[MQTT] re-abonnement (aucune telemetry recue encore)")
             except Exception as e:
                 print("[MQTT] re-abonnement echoue:", e)
+        if _last_mqtt_loopback_try_at == 0 or now - _last_mqtt_loopback_try_at >= 120:
+            loopback_ok = _mqtt_try_loopback() or (_last_mqtt_loopback_at > 0)
 
     rx_hint = ""
     if mqtt_ok and _last_mqtt_rx_at == 0:
-        rx_hint = (
-            "Render connecte a HiveMQ mais aucune telemetrie ESP recue. "
-            "Verifiez moniteur serie: [MQTT] Telemetrie publiee... ou MQTT deconnecte."
-        )
+        if loopback_ok:
+            rx_hint = (
+                "Render recoit bien MQTT (test loopback OK) mais pas l'ESP. "
+                "Re-flashez l'ESP, verifiez MQTT_PASSWORD identique Render/weather_secrets.h, "
+                "serie: [MQTT] OK publie ... -> irrigation/station01/telemetry"
+            )
+        else:
+            rx_hint = (
+                "Render connecte a HiveMQ mais aucun message telemetry (ESP ou abonnement). "
+                "Verifiez permissions HiveMQ irrigation/# et moniteur serie ESP."
+            )
     elif _last_mqtt_rx_at > 0:
         rx_hint = f"Derniere telemetrie il y a {now - _last_mqtt_rx_at}s."
 
@@ -492,8 +543,11 @@ def api_health() -> Any:
                 "DATABASE_URL": bool(_env("DATABASE_URL")),
                 "MQTT_HOST": bool(_env("MQTT_HOST") or _env("MQTT_BROKER_HOST")),
                 "MQTT_USER": bool(_env("MQTT_USER")),
+                "MQTT_PASSWORD": bool(_env("MQTT_PASSWORD")),
                 "DEVICE_ID": _env("DEVICE_ID", "station01"),
             },
+            "mqtt_loopback_ok": loopback_ok,
+            "mqtt_sub_errors": _mqtt_sub_errors[-3:],
             "mqtt_target": f"{ns.mqtt_host}:{ns.mqtt_port}" if ns else "",
             "topic_telemetry": ns.topic_telemetry if ns else "",
             "topic_command": ns.topic_command if ns else "",
