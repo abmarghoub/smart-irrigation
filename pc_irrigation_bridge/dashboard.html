@@ -110,6 +110,19 @@ function fmt(x,dec){
   return x.toFixed(dec);
 }
 function clamp01(x){ if(!Number.isFinite(x)) return 0; return Math.max(0,Math.min(100,x)); }
+function manualOk(j){
+  const m=j.manual||{};
+  if(m.confirmed===true||m.confirmed===1) return true;
+  const mi=j.model_inputs||{};
+  return typeof mi.crop_idx==="number"&&mi.crop_idx>=0&&typeof mi.age_days==="number"&&mi.age_days>0;
+}
+function predActive(j){
+  const d=j.decision||{}, m=j.model_inputs||{};
+  if(d.prediction_active===true||d.prediction_active===1) return true;
+  if(manualOk(j)) return true;
+  if(typeof d.p==="number"&&Number.isFinite(d.p)&&manualOk(j)) return true;
+  return false;
+}
 function bar(label,pct,valStr){
   pct=clamp01(pct);
   return `<div class="barrow"><span class="barlab">${label}</span><div class="bartrack"><div class="barfill" style="width:${pct}%"></div></div><span class="barval">${valStr}</span></div>`;
@@ -151,12 +164,13 @@ async function poll(){
     }
     document.getElementById("lastupd").textContent="Derniere mise a jour : "+new Date().toLocaleTimeString();
     const s=j.sensors||{},w=j.weather||{},m=j.model_inputs||{},d=j.decision||{};
-    const pred=!!(d&&d.prediction_active);
+    const manOk=manualOk(j);
+    const pred=predActive(j);
     document.getElementById("conn_flow").innerHTML="<strong>Debit (capteur)</strong> : "+fmt(s.flow_lpm,2)+" L/min";
-    if(j.manual&&j.manual.confirmed){
-      const ci=typeof j.manual.crop_idx==="number"?j.manual.crop_idx:null;
-      const si=typeof j.manual.soil_idx==="number"?j.manual.soil_idx:null;
-      const ag=typeof j.manual.crop_age_days==="number"?j.manual.crop_age_days:null;
+    if(manOk){
+      const ci=typeof j.manual?.crop_idx==="number"?j.manual.crop_idx:(typeof m.crop_idx==="number"?m.crop_idx:null);
+      const si=typeof j.manual?.soil_idx==="number"?j.manual.soil_idx:(typeof m.soil_idx==="number"?m.soil_idx:null);
+      const ag=typeof j.manual?.crop_age_days==="number"?j.manual.crop_age_days:(typeof m.age_days==="number"?m.age_days:null);
       document.getElementById("conn_manual").innerHTML="<strong>Saisie active</strong> : age <strong>"+(ag!=null?ag:"—")+"</strong> j · <strong>"+(ci!=null?CROP_L[ci]:"—")+"</strong> · <strong>"+(si!=null?SOIL_L[si]:"—")+"</strong>";
       document.getElementById("conn_decision").innerHTML="<strong>Decision</strong> : P="+fmt(d.p,4)+" · irriguer="+(d.irrigate===1||d.irrigate===true?"<strong>OUI</strong>":"<strong>NON</strong>")+" · vol. modele "+fmt(d.volume_model_l,2)+" L · vanne "+(d.valve_on?"<strong>ON</strong>":"<strong>OFF</strong>")+" · dose "+fmt(d.dose_delivered_l,2)+"/"+fmt(d.dose_target_l,2)+" L";
     }else{
@@ -200,12 +214,15 @@ async function poll(){
       el("Vanne",null,pred?((d.valve_on?"ON":"OFF")+" <span class='badge "+(d.valve_on?"on":"off")+"'>"+(d.valve_on?"ouverte":"fermee")+"</span>"):"—",""),
       el("Dose livree / cible",null,pred?fmt(d.dose_delivered_l,2)+" / "+fmt(d.dose_target_l,2):"—","L"),
       el("Fallback / Vent bloc.",null,pred?((d.fallback?"oui":"non")+" · "+(d.wind_block?"oui":"non")):"—",""),
-      el("Saisie manuelle",null,(j.manual&&j.manual.confirmed)?"confirmee":"en attente","")
+      el("Saisie manuelle",null,manOk?"confirmee":"en attente","")
     ].join("");
-    if(j.manual&&j.manual.confirmed){
-      if(typeof j.manual.crop_age_days==="number")document.getElementById("crop_age_days").value=String(j.manual.crop_age_days);
-      if(typeof j.manual.crop_idx==="number")document.getElementById("crop_idx").value=String(j.manual.crop_idx);
-      if(typeof j.manual.soil_idx==="number")document.getElementById("soil_idx").value=String(j.manual.soil_idx);
+    if(manOk){
+      const agFill=typeof j.manual?.crop_age_days==="number"?j.manual.crop_age_days:(typeof m.age_days==="number"?m.age_days:null);
+      const ciFill=typeof j.manual?.crop_idx==="number"?j.manual.crop_idx:(typeof m.crop_idx==="number"?m.crop_idx:null);
+      const siFill=typeof j.manual?.soil_idx==="number"?j.manual.soil_idx:(typeof m.soil_idx==="number"?m.soil_idx:null);
+      if(agFill!=null)document.getElementById("crop_age_days").value=String(agFill);
+      if(ciFill!=null)document.getElementById("crop_idx").value=String(ciFill);
+      if(siFill!=null)document.getElementById("soil_idx").value=String(siFill);
     }
   }catch(e){
     console.error(e);

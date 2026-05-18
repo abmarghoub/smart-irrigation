@@ -231,7 +231,15 @@ def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage
     if not _is_telemetry_topic(topic) or "sensors" not in payload:
         return
     with _state_lock:
-        _last_state = payload
+        merged = dict(payload)
+        if _last_state:
+            for key in ("decision", "manual", "model_inputs"):
+                if key not in merged and key in _last_state:
+                    merged[key] = _last_state[key]
+        if "decision" not in payload and "sensors" in payload:
+            print("[MQTT] telemetry sans bloc decision (JSON tronque cote ESP ?)")
+        _last_state = merged
+        payload = merged
 
     row = extract_telemetry_from_mqtt(payload)
 
