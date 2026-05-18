@@ -108,6 +108,8 @@ static void mqtt_on_message(char* topic, byte* payload, unsigned int length) {
   if (mqtt_apply_manual_json(doc, "commande")) return;
 }
 
+static void mqtt_publish_online_ping();
+
 static void mqtt_print_rc_hint(int rc) {
   Serial.print(F("[MQTT] Echec, rc="));
   Serial.println(rc);
@@ -158,6 +160,10 @@ static bool mqtt_connect() {
     mqtt_print_rc_hint(s_mqtt.state());
     return false;
   }
+  for (int i = 0; i < 5; i++) {
+    s_mqtt.loop();
+    delay(10);
+  }
   Serial.println(F("[MQTT] Connecte a HiveMQ"));
   bool sub_ok = s_mqtt.subscribe(MQTT_TOPIC_COMMAND);
   if (sub_ok) {
@@ -177,7 +183,57 @@ static bool mqtt_connect() {
     Serial.print(F("[MQTT] Abonne (relay) "));
     Serial.println(MQTT_TOPIC_RELAY);
   }
+  mqtt_publish_online_ping();
   return true;
+}
+
+/** Petit message garanti < 400 o — verifie permission PUBLISH sur topic telemetry. */
+static void mqtt_publish_online_ping() {
+  if (!s_mqtt.connected()) return;
+
+  StaticJsonDocument<384> doc;
+  doc["wifi_connected"] = true;
+  char ipb[20] = {};
+  WiFi.localIP().toString().toCharArray(ipb, sizeof(ipb));
+  doc["ip"] = ipb;
+  doc["uptime_s"] = millis() / 1000UL;
+
+  JsonObject s = doc.createNestedObject("sensors");
+  s["soil_pct"] = 0.f;
+  s["temp_c"] = 0.f;
+  s["rh_pct"] = 0.f;
+  s["flow_lpm"] = 0.f;
+
+  JsonObject w = doc.createNestedObject("weather");
+  w["temp_c"] = 0.f;
+  w["rh_pct"] = 0.f;
+  w["rain_mm"] = 0.f;
+  w["wind_ms"] = 0.f;
+  w["station_used"] = false;
+
+  doc.createNestedObject("model_inputs");
+  JsonObject man = doc.createNestedObject("manual");
+  man["confirmed"] = false;
+  JsonObject dec = doc.createNestedObject("decision");
+  dec["prediction_active"] = false;
+
+  char buf[400];
+  size_t n = serializeJson(doc, buf, sizeof(buf) - 1);
+  if (n == 0) return;
+  buf[n] = '\0';
+
+  bool pub = s_mqtt.publish(MQTT_TOPIC_TELEMETRY, buf, true);
+  if (!pub) pub = s_mqtt.publish(MQTT_TOPIC_TELEMETRY, buf, false);
+  s_mqtt.loop();
+  Serial.print(F("[MQTT] Heartbeat telemetry "));
+  Serial.print(pub ? F("OK") : F("ECHEC"));
+  Serial.print(F(" ("));
+  Serial.print(n);
+  Serial.print(F(" o) topic="));
+  Serial.println(MQTT_TOPIC_TELEMETRY);
+  if (!pub) {
+    Serial.println(F("[MQTT] -> HiveMQ: autoriser PUBLISH sur irrigation/# pour cet utilisateur"));
+  }
 }
 
 void mqtt_irrigation_begin() {
@@ -198,10 +254,28 @@ void mqtt_irrigation_begin() {
 #endif
   Serial.print(F("  telemetry="));
   Serial.println(MQTT_TOPIC_TELEMETRY);
+  Serial.print(F("  user="));
+  Serial.println(MQTT_USER);
   if (strlen(MQTT_PASSWORD) < 4 || strstr(MQTT_PASSWORD, "REMPLACER") != nullptr) {
     Serial.println(F("[MQTT] ATTENTION: MQTT_PASSWORD non configure dans weather_secrets.h"));
   }
   mqtt_connect();
+}
+
+void mqtt_irrigation_test_publish() {
+  for (int i = 0; i < 8; i++) {
+    s_mqtt.loop();
+    delay(20);
+  }
+  if (!s_mqtt.connected()) {
+    Serial.println(F("[MQTT] test: reconnexion..."));
+    mqtt_connect();
+  }
+  if (!s_mqtt.connected()) {
+    Serial.println(F("[MQTT] test: impossible (pas connecte a HiveMQ)"));
+    return;
+  }
+  mqtt_publish_online_ping();
 }
 
 void mqtt_irrigation_loop() {
@@ -318,8 +392,8 @@ void mqtt_irrigation_publish_state(
   if (n == 0) return;
   s_payload[n] = '\0';
 
-  bool pub = s_mqtt.publish(MQTT_TOPIC_TELEMETRY, (const uint8_t*)s_payload, n, true);
-  if (!pub) pub = s_mqtt.publish(MQTT_TOPIC_TELEMETRY, (const uint8_t*)s_payload, n, false);
+  bool pub = s_mqtt.publish(MQTT_TOPIC_TELEMETRY, s_payload, true);
+  if (!pub) pub = s_mqtt.publish(MQTT_TOPIC_TELEMETRY, s_payload, false);
   if (!pub) {
     uint32_t ms = millis();
     if (ms - s_last_publish_fail_log_ms >= 15000UL) {

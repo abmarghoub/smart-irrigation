@@ -8,6 +8,8 @@
 
 void mqtt_irrigation_begin();
 void mqtt_irrigation_loop();
+/** Test immediat publish telemetry (commande serie M). */
+void mqtt_irrigation_test_publish();
 /** Force le prochain tour capteurs/MQTT (apres commande manuelle distante). */
 void irrigation_request_sensor_cycle();
 void mqtt_irrigation_publish_state(
@@ -42,6 +44,7 @@ void mqtt_irrigation_publish_state(
 
 inline void mqtt_irrigation_begin() {}
 inline void mqtt_irrigation_loop() {}
+inline void mqtt_irrigation_test_publish() {}
 inline void irrigation_request_sensor_cycle() {}
 inline void mqtt_irrigation_publish_state(
     uint32_t, bool, const char*, float, float, float, float, float, float, float, float, bool, const float*, int, int, int,

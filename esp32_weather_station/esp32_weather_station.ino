@@ -346,11 +346,19 @@ static void poll_user_serial() {
   char c0 = line.charAt(0);
   char c = (c0 >= 'a' && c0 <= 'z') ? (char)(c0 - 'a' + 'A') : c0;
   if (c == 'H') {
-    Serial.println(F("Commandes: A <jours> | C <0-3> | S <0-3>"));
+    Serial.println(F("Commandes: A <jours> | C <0-3> | S <0-3> | M | H"));
     Serial.println(F("Exemples: A 60  | C 2 | S 1"));
+    Serial.println(F("  M = test publish MQTT telemetry (HiveMQ)"));
     Serial.println(F("Formats acceptes: A60 / A=60 / A 60"));
     return;
   }
+#if ENABLE_MQTT
+  if (c == 'M') {
+    mqtt_irrigation_test_publish();
+    irrigation_request_sensor_cycle();
+    return;
+  }
+#endif
 
   // Accepte "A 60", "A60", "A=60", "A:60"
   String arg = line.substring(1);
@@ -662,7 +670,7 @@ void setup() {
 
   Serial.println(F("=== Irrigation ESP32: capteurs + station meteo + decision ==="));
   Serial.println(F("Capteurs: DHT22(GPIO4), Sol B42(GPIO34), YF-S201(GPIO5), Vanne(GPIO18)"));
-  Serial.println(F("Saisie: A <jours> | C <0-3> | S <0-3> | H"));
+  Serial.println(F("Saisie: A <jours> | C <0-3> | S <0-3> | M (test MQTT) | H"));
   Serial.println(F("Prediction MLP desactivee tant que la saisie n'est pas confirmee (MQTT depuis le PC, formulaire du dashboard local, ou A/C/S au moniteur serie)."));
 
   if (strlen(WIFI_SSID) > 0) {
