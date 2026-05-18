@@ -47,6 +47,9 @@
 #ifndef MQTT_TOPIC_COMMAND
 #define MQTT_TOPIC_COMMAND "irrigation/station01/command/manual"
 #endif
+#ifndef MQTT_TOPIC_RELAY
+#define MQTT_TOPIC_RELAY "irrigation/station01/command/relay"
+#endif
 #ifndef MQTT_USE_AUTH
 #define MQTT_USE_AUTH 1
 #endif

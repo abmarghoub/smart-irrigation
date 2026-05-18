@@ -53,6 +53,7 @@ _bootstrap_lock = threading.Lock()
 _bootstrapped = False
 _bootstrap_notes: list[str] = []
 _last_manual_publish: dict[str, Any] = {}
+_last_mqtt_rx_at: int = 0
 
 
 def _env(key: str, default: str = "") -> str:
@@ -192,6 +193,8 @@ def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage
     if "sensors" not in payload:
         return
 
+    global _last_mqtt_rx_at
+    _last_mqtt_rx_at = int(time.time())
     with _state_lock:
         _last_state = payload
 
@@ -428,10 +431,19 @@ def api_health() -> Any:
             "topic_telemetry": ns.topic_telemetry if ns else "",
             "topic_command": ns.topic_command if ns else "",
             "topic_command_legacy": _env("MQTT_TOPIC_COMMAND_LEGACY", "irrigation/command/manual"),
+            "topic_relay": _relay_topic(ns) if ns else "",
+            "last_mqtt_rx_at": _last_mqtt_rx_at,
             "last_manual_publish": _last_manual_publish,
             "notes": _bootstrap_notes[-5:],
         }
     )
+
+
+def _relay_topic(ns: argparse.Namespace) -> str:
+    t = _env("MQTT_TOPIC_RELAY", "").strip()
+    if t:
+        return t
+    return f"irrigation/{ns.device_id}/command/relay"
 
 
 def _command_topics(ns: argparse.Namespace) -> list[str]:
@@ -470,18 +482,14 @@ def _mqtt_publish_manual(age: int, ci: int, si: int) -> tuple[list[dict[str, Any
     body_cmd = json.dumps({"crop_age_days": age, "crop_idx": ci, "soil_idx": si})
     body_relay = json.dumps({"cmd": "manual", "crop_age_days": age, "crop_idx": ci, "soil_idx": si})
     results: list[dict[str, Any]] = []
+    relay_topic = _relay_topic(_args_ns)
 
-    for topic in _command_topics(_args_ns):
-        r1 = _mqtt_publish_one(topic, body_cmd, qos=1)
+    for topic in (relay_topic, *_command_topics(_args_ns)):
+        body = body_relay if topic == relay_topic else body_cmd
+        r1 = _mqtt_publish_one(topic, body, qos=0)
         results.append(r1)
         if not r1.get("published"):
-            results.append(_mqtt_publish_one(topic, body_cmd, qos=0))
-
-    if not any(r.get("published") for r in results):
-        print("[bridge] command topics failed -> relay via telemetry")
-        results.append(_mqtt_publish_one(_args_ns.topic_telemetry, body_relay, qos=1))
-        if not results[-1].get("published"):
-            results.append(_mqtt_publish_one(_args_ns.topic_telemetry, body_relay, qos=0))
+            results.append(_mqtt_publish_one(topic, body, qos=1))
 
     _last_manual_publish = {
         "body_cmd": body_cmd,
@@ -511,9 +519,7 @@ def api_manual() -> Any:
 
     results, body_cmd, body_relay = _mqtt_publish_manual(age, ci, si)
     ok = any(r.get("published") for r in results)
-    via = "relay-telemetry" if any(
-        r.get("published") and r.get("topic") == _args_ns.topic_telemetry for r in results
-    ) else "command"
+    via = "relay" if any(r.get("published") and r.get("topic") == _relay_topic(_args_ns) for r in results) else "command"
     return jsonify(
         {
             "ok": bool(ok),

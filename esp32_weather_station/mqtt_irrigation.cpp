@@ -144,9 +144,9 @@ static bool mqtt_connect() {
       Serial.println(legacy_cmd);
     }
   }
-  if (s_mqtt.subscribe(MQTT_TOPIC_TELEMETRY)) {
+  if (strlen(MQTT_TOPIC_RELAY) > 0 && s_mqtt.subscribe(MQTT_TOPIC_RELAY)) {
     Serial.print(F("[MQTT] Abonne (relay) "));
-    Serial.println(MQTT_TOPIC_TELEMETRY);
+    Serial.println(MQTT_TOPIC_RELAY);
   }
   return true;
 }

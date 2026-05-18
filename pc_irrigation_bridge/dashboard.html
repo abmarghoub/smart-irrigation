@@ -113,6 +113,14 @@ function bar(label,pct,valStr){
   pct=clamp01(pct);
   return `<div class="barrow"><span class="barlab">${label}</span><div class="bartrack"><div class="barfill" style="width:${pct}%"></div></div><span class="barval">${valStr}</span></div>`;
 }
+async function readJson(r){
+  const ct=(r.headers.get("Content-Type")||"").toLowerCase();
+  const text=await r.text();
+  if(!ct.includes("json")&&text.trim().startsWith("<")){
+    throw new Error("HTTP "+r.status+" : reponse HTML (service Render en demarrage ?). Reessayez dans 1 min.");
+  }
+  try{return JSON.parse(text);}catch(e){throw new Error("JSON invalide: "+text.slice(0,80));}
+}
 async function poll(){
   const errEl=document.getElementById("poll_err");
   const base=window.location.origin;
@@ -120,7 +128,8 @@ async function poll(){
     errEl.textContent="";
     const r=await fetch(base+"/api/state",{cache:"no-store"});
     if(!r.ok){ errEl.textContent="Erreur /api/state HTTP "+r.status; return; }
-    const j=await r.json();
+    const j=await readJson(r);
+    if(j.note&&!j.sensors){ errEl.textContent=j.note; }
     document.getElementById("ip").innerHTML="IP (ESP32) : <strong>"+(j.ip||"—")+"</strong>"+(j.wifi_connected?" ✓":" (WiFi ESP deconnecte)");
     document.getElementById("lastupd").textContent="Derniere mise a jour : "+new Date().toLocaleTimeString();
     const s=j.sensors||{},w=j.weather||{},m=j.model_inputs||{},d=j.decision||{};
@@ -199,7 +208,7 @@ document.getElementById("f").onsubmit=async (e)=>{
   const body=new URLSearchParams({crop_age_days:age,crop_idx:ci,soil_idx:si});
   try{
     const r=await fetch(window.location.origin+"/api/manual",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
-    const t=await r.json();
+    const t=await readJson(r);
     if(r.ok&&t&&t.ok){
       const tops=(t.topics||[]).map(x=>x.topic+(x.published?" OK":" ECHEC")).join(", ");
       const via=t.via?(" via "+t.via):"";
