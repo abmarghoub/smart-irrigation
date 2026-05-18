@@ -29,7 +29,8 @@ static const char* kCropNames[] = {"Maize", "Rice", "Tomato", "Wheat"};
 static const char* kSoilNames[] = {"Clayey", "Loamy", "Sandy", "Silty"};
 
 static void mqtt_on_message(char* topic, byte* payload, unsigned int length) {
-  (void)topic;
+  Serial.print(F("[MQTT] RX topic="));
+  Serial.println(topic);
   if (length >= sizeof(s_rx_cmd)) length = sizeof(s_rx_cmd) - 1;
   memcpy(s_rx_cmd, payload, length);
   s_rx_cmd[length] = '\0';
@@ -116,11 +117,19 @@ static bool mqtt_connect() {
     mqtt_print_rc_hint(s_mqtt.state());
     return false;
   }
-  if (s_mqtt.subscribe(MQTT_TOPIC_COMMAND)) {
+  bool sub_ok = s_mqtt.subscribe(MQTT_TOPIC_COMMAND);
+  if (sub_ok) {
     Serial.print(F("[MQTT] Abonne "));
     Serial.println(MQTT_TOPIC_COMMAND);
   } else {
     Serial.println(F("[MQTT] Echec abonnement commande"));
+  }
+  const char* legacy_cmd = "irrigation/command/manual";
+  if (strcmp(legacy_cmd, MQTT_TOPIC_COMMAND) != 0) {
+    if (s_mqtt.subscribe(legacy_cmd)) {
+      Serial.print(F("[MQTT] Abonne (legacy) "));
+      Serial.println(legacy_cmd);
+    }
   }
   return true;
 }

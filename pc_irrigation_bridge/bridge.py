@@ -52,6 +52,7 @@ _mysql_store: MySQLStore | None = None
 _bootstrap_lock = threading.Lock()
 _bootstrapped = False
 _bootstrap_notes: list[str] = []
+_last_manual_publish: dict[str, Any] = {}
 
 
 def _env(key: str, default: str = "") -> str:
@@ -174,6 +175,10 @@ def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage
     global _last_state
     if not _args_ns:
         return
+    topic = msg.topic or ""
+    if topic == _args_ns.topic_command:
+        print(f"[MQTT] echo commande recu sur {topic!r} ({len(msg.payload)} octets)")
+        return
     try:
         payload = json.loads(msg.payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -231,7 +236,8 @@ def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client | None:
     def on_connect(client: mqtt.Client, _userdata: Any, _flags: Any, rc: int) -> None:
         if rc == 0:
             client.subscribe(ns.topic_telemetry, qos=0)
-            print(f"[MQTT] connecte, abonne a {ns.topic_telemetry!r}")
+            client.subscribe(ns.topic_command, qos=1)
+            print(f"[MQTT] connecte, abonne a {ns.topic_telemetry!r} et {ns.topic_command!r}")
         else:
             print(f"[MQTT] connexion refusee, code {rc}")
             _bootstrap_notes.append(f"MQTT on_connect rc={rc}")
@@ -413,15 +419,56 @@ def api_health() -> Any:
             "mqtt_target": f"{ns.mqtt_host}:{ns.mqtt_port}" if ns else "",
             "topic_telemetry": ns.topic_telemetry if ns else "",
             "topic_command": ns.topic_command if ns else "",
+            "topic_command_legacy": _env("MQTT_TOPIC_COMMAND_LEGACY", "irrigation/command/manual"),
+            "last_manual_publish": _last_manual_publish,
             "notes": _bootstrap_notes[-5:],
         }
     )
 
 
+def _command_topics(ns: argparse.Namespace) -> list[str]:
+    """Topic principal + ancien topic (compatibilite firmware)."""
+    topics = [ns.topic_command]
+    legacy = _env("MQTT_TOPIC_COMMAND_LEGACY", "irrigation/command/manual")
+    if legacy and legacy not in topics:
+        topics.append(legacy)
+    return topics
+
+
+def _mqtt_publish_json(topics: list[str], body: str) -> list[dict[str, Any]]:
+    global _last_manual_publish
+    if not _mqtt_client:
+        return []
+    out: list[dict[str, Any]] = []
+    for topic in topics:
+        info = _mqtt_client.publish(topic, body, qos=1, retain=False)
+        published = False
+        err = ""
+        if info.rc == mqtt.MQTT_ERR_SUCCESS:
+            try:
+                published = bool(info.wait_for_publish(timeout=8.0))
+            except Exception as e:
+                err = str(e)
+        out.append(
+            {
+                "topic": topic,
+                "mqtt_rc": int(info.rc),
+                "published": published,
+                "error": err,
+            }
+        )
+        print(f"[bridge] publish {topic!r} rc={info.rc} published={published} body={body}")
+    _last_manual_publish = {"body": body, "results": out, "at": int(time.time())}
+    return out
+
+
 @app.route("/api/manual", methods=["POST"])
 def api_manual() -> Any:
+    global _last_manual_publish
     if not _mqtt_client or not _args_ns:
         return jsonify({"ok": False, "error": "MQTT non initialise"}), 503
+    if not _mqtt_client.is_connected():
+        return jsonify({"ok": False, "error": "MQTT deconnecte (reessayez dans 10 s)"}), 503
     try:
         age = int(request.form.get("crop_age_days", 0))
         ci = int(request.form.get("crop_idx", ""))
@@ -433,16 +480,15 @@ def api_manual() -> Any:
     if ci < 0 or ci > 3 or si < 0 or si > 3:
         return jsonify({"ok": False, "error": "culture et sol : indices 0-3"}), 400
     body = json.dumps({"crop_age_days": age, "crop_idx": ci, "soil_idx": si})
-    topic = _args_ns.topic_command
-    info = _mqtt_client.publish(topic, body, qos=1)
-    ok = info.rc == mqtt.MQTT_ERR_SUCCESS
-    print(f"[bridge] publish manuel topic={topic!r} rc={info.rc} payload={body}")
+    topics = _command_topics(_args_ns)
+    results = _mqtt_publish_json(topics, body)
+    ok = any(r.get("published") for r in results) or any(r.get("mqtt_rc") == 0 for r in results)
     return jsonify(
         {
             "ok": bool(ok),
-            "topic": topic,
+            "topics": results,
             "payload": json.loads(body),
-            "mqtt_rc": int(info.rc),
+            "hint": "Verifiez moniteur ESP : [MQTT] Saisie manuelle appliquee",
         }
     )
 
