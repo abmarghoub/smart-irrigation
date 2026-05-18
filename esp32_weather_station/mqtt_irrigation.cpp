@@ -106,6 +106,8 @@ static void mqtt_on_message(char* topic, byte* payload, unsigned int length) {
     return;
   }
   if (mqtt_apply_manual_json(doc, "commande")) return;
+  Serial.print(F("[MQTT] Commande ignoree, payload="));
+  Serial.println(s_rx_cmd);
 }
 
 static void mqtt_publish_online_ping();
@@ -288,7 +290,9 @@ void mqtt_irrigation_loop() {
     mqtt_connect();
     return;
   }
-  s_mqtt.loop();
+  for (int i = 0; i < 8; i++) {
+    s_mqtt.loop();
+  }
 }
 
 void mqtt_irrigation_publish_state(

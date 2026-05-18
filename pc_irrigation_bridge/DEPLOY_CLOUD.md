@@ -63,4 +63,5 @@ Premier acces apres inactivite : Render free peut mettre ~1 min a demarrer.
 | `postgres: false` | `DATABASE_URL` invalide (encoder `#` en `%23`) |
 | Dashboard vide | ESP non connecte ou topics differents Render/ESP |
 | ESP `Heartbeat OK` mais `mqtt_rx_count: 0` | HiveMQ : **Subscribe** sur `irrigation/station01/telemetry` ; `git push` bridge ; health → `mqtt_loopback_ok: true` |
+| Dashboard « OK » mais ESP sans `[MQTT] RX` | HiveMQ : **Publish** sur `irrigation/station01/command/relay` et `.../command/manual` ; bridge utilise QoS 1 (PUBACK) |
 | CSV vide | Attendre des messages MQTT avec saisie manuelle confirmee |

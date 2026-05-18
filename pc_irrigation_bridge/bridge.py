@@ -640,21 +640,24 @@ def _command_topics(ns: argparse.Namespace) -> list[str]:
     return topics
 
 
-def _mqtt_publish_one(topic: str, body: str, qos: int) -> dict[str, Any]:
-    """Publie avec boucle MQTT active (Render/gunicorn)."""
+def _mqtt_publish_one(topic: str, body: str, qos: int = 1) -> dict[str, Any]:
+    """Publie et attend le PUBACK (QoS 1) — QoS 0 ment souvent si HiveMQ refuse (ACL)."""
     if not _mqtt_client:
         return {"topic": topic, "mqtt_rc": -1, "published": False, "qos": qos}
+    try:
+        if not _mqtt_client.is_connected():
+            return {"topic": topic, "mqtt_rc": -2, "published": False, "qos": qos}
+    except Exception:
+        return {"topic": topic, "mqtt_rc": -2, "published": False, "qos": qos}
+
     info = _mqtt_client.publish(topic, body, qos=qos, retain=False)
-    published = False
     if info.rc != mqtt.MQTT_ERR_SUCCESS:
         return {"topic": topic, "mqtt_rc": int(info.rc), "published": False, "qos": qos}
 
-    deadline = time.time() + 10.0
+    published = False
+    deadline = time.time() + 15.0
     while time.time() < deadline:
-        time.sleep(0.1)
-        if qos == 0:
-            published = True
-            break
+        time.sleep(0.05)
         if info.is_published():
             published = True
             break
@@ -669,11 +672,14 @@ def _mqtt_publish_manual(age: int, ci: int, si: int) -> tuple[list[dict[str, Any
     results: list[dict[str, Any]] = []
     relay_topic = _relay_topic(_args_ns)
 
-    for topic in (relay_topic, *_command_topics(_args_ns)):
-        body = body_relay if topic == relay_topic else body_cmd
-        r1 = _mqtt_publish_one(topic, body, qos=0)
-        results.append(r1)
-        if not r1.get("published"):
+    r_relay = _mqtt_publish_one(relay_topic, body_relay, qos=1)
+    results.append(r_relay)
+    if not r_relay.get("published"):
+        for topic in _command_topics(_args_ns):
+            results.append(_mqtt_publish_one(topic, body_cmd, qos=1))
+    else:
+        for topic in _command_topics(_args_ns):
+            body = body_cmd
             results.append(_mqtt_publish_one(topic, body, qos=1))
 
     _last_manual_publish = {
@@ -704,14 +710,28 @@ def api_manual() -> Any:
 
     results, body_cmd, body_relay = _mqtt_publish_manual(age, ci, si)
     ok = any(r.get("published") for r in results)
-    via = "relay" if any(r.get("published") and r.get("topic") == _relay_topic(_args_ns) for r in results) else "command"
+    relay_topic = _relay_topic(_args_ns)
+    via = "relay" if any(r.get("published") and r.get("topic") == relay_topic for r in results) else "command"
+    if not ok:
+        return jsonify(
+            {
+                "ok": False,
+                "via": via,
+                "topics": results,
+                "payload": json.loads(body_cmd),
+                "error": (
+                    "Publish MQTT refuse par HiveMQ (PUBLISH sur command/relay). "
+                    "Permissions : irrigation/station01/command/# et irrigation/command/manual"
+                ),
+            }
+        ), 502
     return jsonify(
         {
-            "ok": bool(ok),
+            "ok": True,
             "via": via,
             "topics": results,
             "payload": json.loads(body_cmd),
-            "hint": "Moniteur ESP : [MQTT] Saisie manuelle appliquee (commande ou relay)",
+            "hint": "Moniteur ESP : [MQTT] RX topic=... puis Saisie manuelle appliquee (~5 s)",
         }
     )
 
