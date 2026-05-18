@@ -123,6 +123,31 @@ function predActive(j){
   if(typeof d.p==="number"&&Number.isFinite(d.p)&&manualOk(j)) return true;
   return false;
 }
+let formDirty=false;
+function isManualFormFocused(){
+  const f=document.getElementById("f");
+  const a=document.activeElement;
+  return !!(f&&a&&f.contains(a));
+}
+function syncManualFormFromEsp(j,m,manOk){
+  if(formDirty||isManualFormFocused()) return;
+  if(!manOk) return;
+  const agFill=typeof j.manual?.crop_age_days==="number"?j.manual.crop_age_days:(typeof m.age_days==="number"?m.age_days:null);
+  const ciFill=typeof j.manual?.crop_idx==="number"?j.manual.crop_idx:(typeof m.crop_idx==="number"?m.crop_idx:null);
+  const siFill=typeof j.manual?.soil_idx==="number"?j.manual.soil_idx:(typeof m.soil_idx==="number"?m.soil_idx:null);
+  if(agFill!=null) document.getElementById("crop_age_days").value=String(agFill);
+  if(ciFill!=null) document.getElementById("crop_idx").value=String(ciFill);
+  if(siFill!=null) document.getElementById("soil_idx").value=String(siFill);
+}
+function bindManualFormGuard(){
+  const f=document.getElementById("f");
+  const mark=()=>{ formDirty=true; };
+  ["crop_age_days","crop_idx","soil_idx"].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el){ el.addEventListener("input",mark); el.addEventListener("change",mark); }
+  });
+  if(f){ f.addEventListener("focusin",()=>{ formDirty=true; }); }
+}
 function bar(label,pct,valStr){
   pct=clamp01(pct);
   return `<div class="barrow"><span class="barlab">${label}</span><div class="bartrack"><div class="barfill" style="width:${pct}%"></div></div><span class="barval">${valStr}</span></div>`;
@@ -216,14 +241,7 @@ async function poll(){
       el("Fallback / Vent bloc.",null,pred?((d.fallback?"oui":"non")+" · "+(d.wind_block?"oui":"non")):"—",""),
       el("Saisie manuelle",null,manOk?"confirmee":"en attente","")
     ].join("");
-    if(manOk){
-      const agFill=typeof j.manual?.crop_age_days==="number"?j.manual.crop_age_days:(typeof m.age_days==="number"?m.age_days:null);
-      const ciFill=typeof j.manual?.crop_idx==="number"?j.manual.crop_idx:(typeof m.crop_idx==="number"?m.crop_idx:null);
-      const siFill=typeof j.manual?.soil_idx==="number"?j.manual.soil_idx:(typeof m.soil_idx==="number"?m.soil_idx:null);
-      if(agFill!=null)document.getElementById("crop_age_days").value=String(agFill);
-      if(ciFill!=null)document.getElementById("crop_idx").value=String(ciFill);
-      if(siFill!=null)document.getElementById("soil_idx").value=String(siFill);
-    }
+    syncManualFormFromEsp(j,m,manOk);
   }catch(e){
     console.error(e);
     errEl.textContent="Echec lecture API : "+(e&&e.message?e.message:String(e))+" — URL : "+base+"/";
@@ -245,6 +263,7 @@ document.getElementById("f").onsubmit=async (e)=>{
     const r=await fetch(window.location.origin+"/api/manual",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
     const t=await readJson(r);
     if(r.ok&&t&&t.ok){
+      formDirty=false;
       const tops=(t.topics||[]).map(x=>x.topic+(x.published?" OK":" ECHEC (ACL?)")).join(", ");
       const via=t.via?(" via "+t.via):"";
       msg.textContent="MQTT"+via+": "+(tops||"envoye")+". Attendez ~5 s — serie ESP : [MQTT] RX topic=.../command/relay";
@@ -291,6 +310,7 @@ document.getElementById("btn_dl_csv").onclick=async function(){
     msg.textContent="Echec reseau : "+(e&&e.message?e.message:String(e));
   }
 };
+bindManualFormGuard();
 setInterval(poll,2000);
 poll();
 </script>
