@@ -26,6 +26,27 @@ static char s_rx_cmd[512];
 static uint32_t s_last_reconnect_ms;
 static uint32_t s_last_publish_skip_log_ms;
 static uint32_t s_last_publish_ok_log_ms;
+static uint32_t s_last_publish_fail_log_ms;
+static bool s_mqtt_buffer_ok = false;
+
+static bool mqtt_config_buffer() {
+  if (s_mqtt.connected()) return s_mqtt_buffer_ok;
+  s_mqtt_buffer_ok = false;
+  if (s_mqtt.setBufferSize(2048)) {
+    s_mqtt_buffer_ok = true;
+    Serial.println(F("[MQTT] Buffer 2048 octets OK"));
+    return true;
+  }
+  Serial.println(F("[MQTT] Buffer 2048 echoue, essai 1536..."));
+  if (s_mqtt.setBufferSize(1536)) {
+    s_mqtt_buffer_ok = true;
+    Serial.println(F("[MQTT] Buffer 1536 octets OK"));
+    return true;
+  }
+  Serial.print(F("[MQTT] ATTENTION: buffer MQTT defaut, heap libre="));
+  Serial.println(ESP.getFreeHeap());
+  return false;
+}
 
 static const char* kCropNames[] = {"Maize", "Rice", "Tomato", "Wheat"};
 static const char* kSoilNames[] = {"Clayey", "Loamy", "Sandy", "Silty"};
@@ -110,7 +131,7 @@ static bool mqtt_connect() {
 
   s_mqtt.setServer(MQTT_BROKER_HOST, MQTT_BROKER_PORT);
   s_mqtt.setCallback(mqtt_on_message);
-  s_mqtt.setBufferSize(2560);
+  mqtt_config_buffer();
   if (s_mqtt.connected()) return true;
 
   Serial.print(F("[MQTT] Connexion "));
@@ -229,7 +250,7 @@ void mqtt_irrigation_publish_state(
 
   auto jf = [](float v) { return (isnan(v) || isinf(v)) ? 0.f : v; };
 
-  StaticJsonDocument<2560> doc;
+  StaticJsonDocument<2048> doc;
   doc["wifi_connected"] = wifi_ok;
   doc["ip"] = ip;
   doc["uptime_s"] = uptime_s;
@@ -248,10 +269,6 @@ void mqtt_irrigation_publish_state(
   w["station_used"] = wx_station_used;
 
   JsonObject m = doc.createNestedObject("model_inputs");
-  m["soil_pct"] = jf(raw_features[0]);
-  m["temp_c"] = jf(raw_features[1]);
-  m["rh_pct"] = jf(raw_features[2]);
-  m["rain_mm"] = jf(raw_features[3]);
   if (manual_ok) {
     m["age_days"] = jf((float)crop_age_days);
     m["crop"] = kCropNames[crop_idx];
@@ -309,10 +326,22 @@ void mqtt_irrigation_publish_state(
     return;
   }
   s_payload[n] = '\0';
-  if (!s_mqtt.publish(MQTT_TOPIC_TELEMETRY, s_payload, true)) {
-    Serial.println(F("[MQTT] publish telemetry echoue"));
+  bool pub = s_mqtt.publish(MQTT_TOPIC_TELEMETRY, s_payload, true);
+  if (!pub) pub = s_mqtt.publish(MQTT_TOPIC_TELEMETRY, s_payload, false);
+  if (!pub) {
+    uint32_t ms = millis();
+    if (ms - s_last_publish_fail_log_ms >= 15000UL) {
+      s_last_publish_fail_log_ms = ms;
+      Serial.print(F("[MQTT] publish telemetry echoue, etat="));
+      Serial.print(s_mqtt.state());
+      Serial.print(F(" taille="));
+      Serial.print(n);
+      Serial.print(F(" heap="));
+      Serial.println(ESP.getFreeHeap());
+    }
     return;
   }
+  s_mqtt.loop();
   uint32_t ms = millis();
   if (ms - s_last_publish_ok_log_ms >= 60000UL) {
     s_last_publish_ok_log_ms = ms;

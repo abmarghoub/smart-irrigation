@@ -187,6 +187,7 @@ def _is_telemetry_topic(topic: str) -> bool:
 def _mqtt_subscribe_all(client: mqtt.Client, ns: argparse.Namespace) -> None:
     topics: list[tuple[str, int]] = [
         (ns.topic_telemetry, 0),
+        ("irrigation/+/telemetry", 0),
         (ns.topic_command, 1),
         (f"irrigation/{ns.device_id}/#", 0),
     ]
