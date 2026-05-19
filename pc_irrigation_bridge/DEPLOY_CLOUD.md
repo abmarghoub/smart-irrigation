@@ -50,7 +50,7 @@ Moniteur serie attendu : `WiFi OK`, `[MQTT] Connexion ... (TLS)`, pas d'echec `r
 
 1. `https://VOTRE-APP.onrender.com/api/health` → `"postgres": true`, `"mqtt": true`
 2. Dashboard `/` → donnees capteurs apres ~30 s
-3. `/api/irrigation_log.csv` → export CSV (filtres : `?crop=Tomato&from=2026-01-01&to=2026-05-31`)
+3. `/api/irrigation_log.csv` → export CSV ; filtres optionnels : `crop`, `from`, `to` (seuls ou combines ; `from` seul = jusqu'a aujourd'hui, `to` seul = depuis le debut)
 4. Seules les lignes **completes** (saisie manuelle + MLP, toutes colonnes) sont inserees en base
 4. Telephone en **4G** (WiFi coupe) → meme URL
 

@@ -236,6 +236,7 @@ class PostgresStore:
         if crop_name:
             sql += " AND crop_name = %s"
             params.append(crop_name)
+        now_utc = datetime.now(timezone.utc)
         if date_from is not None:
             sql += " AND recorded_at >= %s"
             params.append(datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc))
@@ -244,6 +245,9 @@ class PostgresStore:
             params.append(
                 datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
             )
+        elif date_from is not None:
+            sql += " AND recorded_at <= %s"
+            params.append(now_utc)
         sql += " ORDER BY recorded_at ASC, id ASC"
 
         out: list[list[Any]] = []
