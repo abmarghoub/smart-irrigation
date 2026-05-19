@@ -15,6 +15,19 @@ h1{font-size:1.25rem;margin:0 0 .5rem}
 .panel{flex:1;min-width:280px;background:var(--card);border-radius:10px;padding:1rem;border:1px solid #2a3544}
 label{display:block;font-size:.8rem;color:var(--muted);margin:.5rem 0 .2rem}
 input,select{width:100%;padding:.5rem;border-radius:8px;border:1px solid #2a3544;background:#0f1419;color:var(--txt)}
+input[type=radio],input[type=checkbox]{width:auto;padding:0;accent-color:var(--acc)}
+.csv-export-form{max-width:420px}
+.csv-export-form .csv-intro{margin:0 0 1rem;color:var(--muted);font-size:.85rem;line-height:1.45}
+.csv-scope{border:1px solid #2a3544;border-radius:8px;padding:.65rem .85rem;margin:0 0 1rem;background:#0f1419}
+.csv-scope legend{padding:0 .35rem;font-size:.8rem;color:var(--muted)}
+.csv-choice{display:flex!important;align-items:center;gap:.5rem;margin:.35rem 0!important;font-size:.9rem!important;color:var(--txt)!important;cursor:pointer}
+.csv-choice input[type=radio]{width:1rem;height:1rem;margin:0;flex:0 0 auto}
+.csv-filters{display:none;margin:0 0 1rem;padding:.85rem;border:1px solid #2a3544;border-radius:8px;background:#0f1419}
+.csv-filters.is-open{display:block}
+.csv-filters .filter-grid{display:grid;gap:.5rem;grid-template-columns:1fr 1fr}
+.csv-filters .filter-grid .full{grid-column:1/-1}
+.csv-export-form button.secondary{width:100%;margin-top:0}
+#csv_dl_msg{margin-top:.5rem;min-height:1.2em}
 button{margin-top:.75rem;padding:.55rem 1rem;border:none;border-radius:8px;background:var(--acc);color:#fff;font-weight:600;cursor:pointer}
 button.secondary{background:#2a3544;color:var(--txt)}
 button.secondary:hover{filter:brightness(1.12)}
@@ -87,26 +100,37 @@ code{font-size:.85em}
 
 <h2 class="sec">Export CSV</h2>
 <div class="chart-panel">
-<p class="sub" style="margin:0 0 .75rem">Seules les lignes completes (saisie + prediction MLP) sont enregistrees en base.</p>
-<form id="csv_export">
-<label style="display:flex;align-items:center;gap:.4rem;margin:.35rem 0"><input type="radio" name="csv_scope" value="all" checked/> Tout le dataset</label>
-<label style="display:flex;align-items:center;gap:.4rem;margin:.35rem 0"><input type="radio" name="csv_scope" value="filter"/> Filtrer</label>
-<div id="csv_filters" style="display:none;margin-top:.5rem;padding-top:.5rem;border-top:1px solid #2a3544">
-<label>Culture</label>
+<form id="csv_export" class="csv-export-form">
+<p class="csv-intro">Seules les lignes completes (saisie + prediction MLP) sont enregistrees en base.</p>
+<fieldset class="csv-scope">
+<legend>Portee de l'export</legend>
+<label class="csv-choice"><input type="radio" name="csv_scope" value="all" checked/> Tout le dataset</label>
+<label class="csv-choice"><input type="radio" name="csv_scope" value="filter"/> Filtrer par culture et periode</label>
+</fieldset>
+<div id="csv_filters" class="csv-filters">
+<div class="filter-grid">
+<div class="full">
+<label for="csv_crop">Culture</label>
 <select id="csv_crop">
-<option value="">Toutes</option>
+<option value="">Toutes les cultures</option>
 <option value="Maize">Maize</option>
 <option value="Rice">Rice</option>
 <option value="Tomato">Tomato</option>
 <option value="Wheat">Wheat</option>
 </select>
-<label>Date debut</label>
+</div>
+<div>
+<label for="csv_from">Date debut</label>
 <input type="date" id="csv_from"/>
-<label>Date fin</label>
+</div>
+<div>
+<label for="csv_to">Date fin</label>
 <input type="date" id="csv_to"/>
 </div>
-<button type="submit" class="secondary" style="margin-top:.75rem">Telecharger CSV</button>
-<p id="csv_dl_msg" class="sub" style="margin-top:.5rem"></p>
+</div>
+</div>
+<button type="submit" class="secondary">Telecharger CSV</button>
+<p id="csv_dl_msg" class="sub"></p>
 </form>
 </div>
 
@@ -299,12 +323,15 @@ document.getElementById("f").onsubmit=async (e)=>{
     msg.textContent="Erreur reseau : "+(err&&err.message?err.message:String(err));
   }
 };
+function updateCsvFiltersPanel(){
+  const el=document.getElementById("csv_filters");
+  const on=document.querySelector('input[name="csv_scope"]:checked')?.value==="filter";
+  el.classList.toggle("is-open",!!on);
+}
 document.querySelectorAll('input[name="csv_scope"]').forEach(r=>{
-  r.addEventListener("change",()=>{
-    document.getElementById("csv_filters").style.display=
-      document.querySelector('input[name="csv_scope"]:checked')?.value==="filter"?"block":"none";
-  });
+  r.addEventListener("change",updateCsvFiltersPanel);
 });
+updateCsvFiltersPanel();
 document.getElementById("csv_export").onsubmit=async function(e){
   e.preventDefault();
   const msg=document.getElementById("csv_dl_msg");
