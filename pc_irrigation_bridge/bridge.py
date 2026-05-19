@@ -89,6 +89,44 @@ _mqtt_maint_running = False
 
 # Render coupe souvent les requetes HTTP a ~30 s ; rester en dessous par publication.
 _MQTT_PUBACK_TIMEOUT_S = 6.0
+# ESP publie la telemetrie toutes les ~5 s ; au-dela, considerer la station hors ligne.
+_TELEMETRY_STALE_DEFAULT_S = 20
+
+
+def _telemetry_stale_seconds() -> int:
+    return max(5, _env_int("TELEMETRY_STALE_SECONDS", _TELEMETRY_STALE_DEFAULT_S))
+
+
+def _telemetry_age_seconds() -> int | None:
+    if _last_mqtt_rx_at <= 0:
+        return None
+    return max(0, int(time.time()) - _last_mqtt_rx_at)
+
+
+def _telemetry_is_stale() -> bool:
+    age = _telemetry_age_seconds()
+    if age is None:
+        return False
+    return age > _telemetry_stale_seconds()
+
+
+def _offline_state_payload(*, note: str, age_s: int | None = None) -> dict[str, Any]:
+    stale_s = _telemetry_stale_seconds()
+    return {
+        "esp_online": False,
+        "telemetry_stale": True,
+        "telemetry_age_s": age_s,
+        "telemetry_stale_seconds": stale_s,
+        "wifi_connected": False,
+        "ip": "",
+        "uptime_s": 0,
+        "sensors": {},
+        "weather": {},
+        "model_inputs": {},
+        "decision": {"prediction_active": False},
+        "manual": {"confirmed": False},
+        "note": note,
+    }
 
 
 def _env(key: str, default: str = "") -> str:
@@ -648,22 +686,31 @@ def index() -> Response:
 
 @app.route("/api/state", methods=["GET"])
 def api_state() -> Any:
+    stale_s = _telemetry_stale_seconds()
     with _state_lock:
         if not _last_state:
             return jsonify(
-                {
-                    "wifi_connected": False,
-                    "ip": "",
-                    "uptime_s": 0,
-                    "sensors": {},
-                    "weather": {},
-                    "model_inputs": {},
-                    "decision": {"prediction_active": False},
-                    "manual": {"confirmed": False},
-                    "note": "En attente du premier message MQTT (telemetrie).",
-                }
+                _offline_state_payload(
+                    note="En attente du premier message MQTT (telemetrie).",
+                )
             )
-        return jsonify(_last_state)
+        if _telemetry_is_stale():
+            age = _telemetry_age_seconds()
+            return jsonify(
+                _offline_state_payload(
+                    note=(
+                        f"ESP hors ligne — derniere telemetrie il y a {age}s "
+                        f"(seuil {stale_s}s). Branchez ou redemarrez l'ESP32."
+                    ),
+                    age_s=age,
+                )
+            )
+        out = dict(_last_state)
+        out["esp_online"] = True
+        out["telemetry_stale"] = False
+        out["telemetry_age_s"] = _telemetry_age_seconds()
+        out["telemetry_stale_seconds"] = stale_s
+        return jsonify(out)
 
 
 @app.route("/api/health", methods=["GET"])
@@ -703,11 +750,23 @@ def api_health() -> Any:
                 "utilisateur que l'ESP. Puis redeployez le bridge (git push)."
             )
     elif _last_mqtt_rx_at > 0:
-        rx_hint = f"Derniere telemetrie il y a {now - _last_mqtt_rx_at}s."
+        age = now - _last_mqtt_rx_at
+        rx_hint = f"Derniere telemetrie il y a {age}s."
+        if age > _telemetry_stale_seconds():
+            rx_hint = (
+                f"ESP hors ligne — derniere telemetrie il y a {age}s "
+                f"(seuil {_telemetry_stale_seconds()}s)."
+            )
+
+    tel_age = _telemetry_age_seconds()
+    esp_online = tel_age is not None and tel_age <= _telemetry_stale_seconds()
 
     return jsonify(
         {
             "ok": True,
+            "esp_online": esp_online,
+            "telemetry_age_s": tel_age,
+            "telemetry_stale_seconds": _telemetry_stale_seconds(),
             "mqtt": mqtt_ok,
             "postgres": pg is not None,
             "env": {

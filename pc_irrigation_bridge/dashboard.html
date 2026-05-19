@@ -128,8 +128,9 @@ code{font-size:.85em}
 <div class="grid" id="cards"><div class="card"><h2>En attente</h2><div class="val">—<small> </small></div></div></div>
 <p id="lastupd"></p>
 
-<footer>Mise a jour toutes les 2 secondes</footer>
+<footer>Mise a jour toutes les 4 secondes</footer>
 <script>
+const POLL_MS=4000;
 const CROP_L=["Maize","Rice","Tomato","Wheat"];
 const SOIL_L=["Clayey","Loamy","Sandy","Silty"];
 const el=(h,t,v,u)=>`<div class="card"><h2>${h}</h2><div class="val">${v}<small> ${u||""}</small></div></div>`;
@@ -145,11 +146,61 @@ function manualOk(j){
   return typeof mi.crop_idx==="number"&&mi.crop_idx>=0&&typeof mi.age_days==="number"&&mi.age_days>0;
 }
 function predActive(j){
+  if(!espOnline(j)) return false;
   const d=j.decision||{}, m=j.model_inputs||{};
   if(d.prediction_active===true||d.prediction_active===1) return true;
   if(manualOk(j)) return true;
   if(typeof d.p==="number"&&Number.isFinite(d.p)&&manualOk(j)) return true;
   return false;
+}
+function espOnline(j,h){
+  if(j&&j.esp_online===true) return true;
+  if(j&&j.esp_online===false) return false;
+  if(j&&j.telemetry_stale===true) return false;
+  const staleSec=(h&&typeof h.telemetry_stale_seconds==="number")?h.telemetry_stale_seconds:20;
+  const age=(typeof j?.telemetry_age_s==="number")?j.telemetry_age_s:
+    (typeof h?.telemetry_age_s==="number")?h.telemetry_age_s:null;
+  if(age!==null&&age>staleSec) return false;
+  if(h&&h.esp_online===false) return false;
+  return !!(j&&j.sensors&&Object.keys(j.sensors).length);
+}
+function renderOfflinePanels(){
+  const dash="—";
+  document.getElementById("conn_flow").innerHTML="<strong>Debit (capteur)</strong> : <span style=color:var(--muted)>"+dash+"</span>";
+  document.getElementById("conn_manual").innerHTML="<strong>Saisie manuelle</strong> : <span style=color:var(--muted)>indisponible (ESP hors ligne)</span>";
+  document.getElementById("conn_decision").innerHTML="<strong>Decision MLP</strong> : <span style=color:var(--muted)>inactive — station hors ligne</span>";
+  document.getElementById("charts").innerHTML=[
+    bar("Sol local (%)",0,dash),
+    bar("Temperature locale",0,dash),
+    bar("Humidite air locale",0,dash),
+    bar("Meteo temperature",0,dash),
+    bar("Meteo humidite",0,dash),
+    bar("Pluie station (0-30mm)",0,dash),
+    bar("Vent (0-15 m/s)",0,dash),
+    bar("Prob. irrigation (P)",0,dash),
+    bar("Volume modele / 2L",0,dash)
+  ].join("");
+  document.getElementById("cards").innerHTML=[
+    el("Sol (local)",null,dash,"%"),
+    el("Temperature (local)",null,dash,"C"),
+    el("Humidite air (local)",null,dash,"%"),
+    el("Debit",null,dash,"L/min"),
+    el("Meteo T",null,dash,"C"),
+    el("Meteo RH",null,dash,"%"),
+    el("Pluie (station)",null,dash,"mm"),
+    el("Vent (station)",null,dash,"m/s"),
+    el("Entrees modele — Sol",null,dash,"%"),
+    el("Entrees — T / RH / Pluie",null,dash,""),
+    el("Age / Culture / Sol",null,dash,""),
+    el("P(irrigation)",null,dash,""),
+    el("Irriguer",null,dash,""),
+    el("Volume modele",null,dash,"L"),
+    el("Cible sol",null,dash,"%"),
+    el("Vanne",null,dash,""),
+    el("Dose livree / cible",null,dash,"L"),
+    el("Fallback / Vent bloc.",null,dash,""),
+    el("Saisie manuelle",null,"hors ligne","")
+  ].join("");
 }
 let formDirty=false;
 function isManualFormFocused(){
@@ -202,7 +253,19 @@ async function poll(){
     let h={};
     if(rh.ok){ try{ h=await readJson(rh); }catch(_e){} }
     document.getElementById("cloud_mqtt").textContent="";
-    if(j.note&&!j.sensors){
+    const online=espOnline(j,h);
+    if(!online){
+      const age=typeof j.telemetry_age_s==="number"?j.telemetry_age_s:
+        (typeof h.telemetry_age_s==="number"?h.telemetry_age_s:null);
+      errEl.textContent=j.note||(age!=null?
+        "ESP hors ligne — derniere telemetrie il y a "+age+" s.":
+        (h.mqtt_rx_hint||"Station hors ligne."));
+      document.getElementById("ip").innerHTML="IP (ESP32) : <strong>—</strong> <span style=color:#ff6b6b>(hors ligne)</span>";
+      document.getElementById("lastupd").textContent="Derniere mise a jour : "+new Date().toLocaleTimeString();
+      renderOfflinePanels();
+      return;
+    }
+    if(j.note&&!Object.keys(j.sensors||{}).length){
       errEl.textContent=j.note;
     }else if(h.last_mqtt_rx_at===0&&h.mqtt_rx_hint){
       errEl.textContent=h.mqtt_rx_hint;
@@ -364,7 +427,7 @@ document.getElementById("csv_export").onsubmit=async function(e){
   }
 };
 bindManualFormGuard();
-setInterval(poll,4000);
+setInterval(poll,POLL_MS);
 poll();
 </script>
 </body>
