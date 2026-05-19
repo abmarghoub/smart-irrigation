@@ -1,6 +1,5 @@
 #include "weather_secrets.h"
 #include "mqtt_irrigation.h"
-#include "device_config.h"
 
 #if ENABLE_MQTT
 
@@ -31,31 +30,6 @@ static uint32_t s_last_publish_skip_log_ms;
 static uint32_t s_last_publish_ok_log_ms;
 static uint32_t s_last_publish_fail_log_ms;
 static bool s_mqtt_buffer_ok = false;
-static uint32_t s_last_prov_hello_ms;
-
-static const char* mqtt_tel_topic() {
-  if (device_config_has_device_id()) return device_config_topic_telemetry();
-  return MQTT_TOPIC_TELEMETRY;
-}
-
-static void mqtt_publish_provisioning_hello() {
-  if (!s_mqtt.connected()) return;
-  StaticJsonDocument<256> doc;
-  doc["cmd"] = "hello";
-  char mac[20];
-  device_config_mac_str(mac, sizeof(mac));
-  doc["mac"] = mac;
-  char ipb[20] = {};
-  WiFi.localIP().toString().toCharArray(ipb, sizeof(ipb));
-  doc["ip"] = ipb;
-  char buf[200];
-  size_t n = serializeJson(doc, buf, sizeof(buf) - 1);
-  if (n == 0) return;
-  buf[n] = '\0';
-  s_mqtt.publish("irrigation/provisioning/hello", buf, false);
-  s_mqtt.loop();
-  Serial.println(F("[MQTT] provisioning hello publie"));
-}
 
 static void mqtt_make_client_id() {
   uint32_t mac = (uint32_t)(ESP.getEfuseMac() >> 16);
@@ -131,22 +105,12 @@ static void mqtt_on_message(char* topic, byte* payload, unsigned int length) {
     Serial.println(err.c_str());
     return;
   }
-  const char* cmd = doc["cmd"] | "";
-  if (strcmp(cmd, "set_device_id") == 0 || strstr(topic, "/provisioning/") != nullptr) {
-    if (device_config_apply_set_device_json(s_rx_cmd)) {
-      s_mqtt.disconnect();
-      delay(200);
-      mqtt_connect();
-    }
-    return;
-  }
   if (mqtt_apply_manual_json(doc, "commande")) return;
   Serial.print(F("[MQTT] Commande ignoree, payload="));
   Serial.println(s_rx_cmd);
 }
 
 static void mqtt_publish_online_ping();
-static bool mqtt_connect();
 
 static void mqtt_print_rc_hint(int rc) {
   Serial.print(F("[MQTT] Echec, rc="));
@@ -203,34 +167,23 @@ static bool mqtt_connect() {
     delay(10);
   }
   Serial.println(F("[MQTT] Connecte a HiveMQ"));
-  if (!device_config_has_device_id()) {
-    const char* prov = device_config_topic_prov_config();
-    if (s_mqtt.subscribe(prov)) {
-      Serial.print(F("[MQTT] Abonne prov "));
-      Serial.println(prov);
-    }
-    mqtt_publish_provisioning_hello();
-    return true;
-  }
-  const char* t_cmd = device_config_topic_command();
-  const char* t_rel = device_config_topic_relay();
-  bool sub_ok = s_mqtt.subscribe(t_cmd);
+  bool sub_ok = s_mqtt.subscribe(MQTT_TOPIC_COMMAND);
   if (sub_ok) {
     Serial.print(F("[MQTT] Abonne "));
-    Serial.println(t_cmd);
+    Serial.println(MQTT_TOPIC_COMMAND);
   } else {
     Serial.println(F("[MQTT] Echec abonnement commande"));
   }
   const char* legacy_cmd = "irrigation/command/manual";
-  if (strcmp(legacy_cmd, t_cmd) != 0) {
+  if (strcmp(legacy_cmd, MQTT_TOPIC_COMMAND) != 0) {
     if (s_mqtt.subscribe(legacy_cmd)) {
       Serial.print(F("[MQTT] Abonne (legacy) "));
       Serial.println(legacy_cmd);
     }
   }
-  if (strlen(t_rel) > 0 && s_mqtt.subscribe(t_rel)) {
+  if (strlen(MQTT_TOPIC_RELAY) > 0 && s_mqtt.subscribe(MQTT_TOPIC_RELAY)) {
     Serial.print(F("[MQTT] Abonne (relay) "));
-    Serial.println(t_rel);
+    Serial.println(MQTT_TOPIC_RELAY);
   }
   mqtt_publish_online_ping();
   return true;
@@ -271,20 +224,15 @@ static void mqtt_publish_online_ping() {
   if (n == 0) return;
   buf[n] = '\0';
 
-  const char* tel = mqtt_tel_topic();
-  if (!device_config_has_device_id()) {
-    mqtt_publish_provisioning_hello();
-    return;
-  }
-  bool pub = s_mqtt.publish(tel, buf, true);
-  if (!pub) pub = s_mqtt.publish(tel, buf, false);
+  bool pub = s_mqtt.publish(MQTT_TOPIC_TELEMETRY, buf, true);
+  if (!pub) pub = s_mqtt.publish(MQTT_TOPIC_TELEMETRY, buf, false);
   s_mqtt.loop();
   Serial.print(F("[MQTT] Heartbeat telemetry "));
   Serial.print(pub ? F("OK") : F("ECHEC"));
   Serial.print(F(" ("));
   Serial.print(n);
   Serial.print(F(" o) topic="));
-  Serial.println(tel);
+  Serial.println(MQTT_TOPIC_TELEMETRY);
   if (!pub) {
     Serial.println(F("[MQTT] -> HiveMQ: autoriser PUBLISH sur irrigation/# pour cet utilisateur"));
   }
@@ -342,13 +290,6 @@ void mqtt_irrigation_loop() {
     mqtt_connect();
     return;
   }
-  if (!device_config_has_device_id()) {
-    uint32_t ms = millis();
-    if (ms - s_last_prov_hello_ms >= 60000UL) {
-      s_last_prov_hello_ms = ms;
-      mqtt_publish_provisioning_hello();
-    }
-  }
   for (int i = 0; i < 8; i++) {
     s_mqtt.loop();
   }
@@ -382,7 +323,6 @@ void mqtt_irrigation_publish_state(
     float dose_d,
     float dose_t) {
   if (strlen(MQTT_BROKER_HOST) == 0) return;
-  if (!device_config_has_device_id()) return;
   if (!s_mqtt.connected()) {
     uint32_t ms = millis();
     if (ms - s_last_publish_skip_log_ms >= 30000UL) {
@@ -398,7 +338,6 @@ void mqtt_irrigation_publish_state(
   doc["wifi_connected"] = wifi_ok;
   doc["ip"] = ip;
   doc["uptime_s"] = uptime_s;
-  if (device_config_has_device_id()) doc["device_id"] = device_config_id();
 
   JsonObject s = doc.createNestedObject("sensors");
   s["soil_pct"] = jf(soil_local);
@@ -457,9 +396,8 @@ void mqtt_irrigation_publish_state(
   if (n == 0) return;
   s_payload[n] = '\0';
 
-  const char* tel = mqtt_tel_topic();
-  bool pub = s_mqtt.publish(tel, s_payload, true);
-  if (!pub) pub = s_mqtt.publish(tel, s_payload, false);
+  bool pub = s_mqtt.publish(MQTT_TOPIC_TELEMETRY, s_payload, true);
+  if (!pub) pub = s_mqtt.publish(MQTT_TOPIC_TELEMETRY, s_payload, false);
   if (!pub) {
     uint32_t ms = millis();
     if (ms - s_last_publish_fail_log_ms >= 15000UL) {
@@ -479,7 +417,7 @@ void mqtt_irrigation_publish_state(
     Serial.print(F("[MQTT] OK publie "));
     Serial.print(n);
     Serial.print(F(" o -> "));
-    Serial.println(tel);
+    Serial.println(MQTT_TOPIC_TELEMETRY);
   }
 }
 

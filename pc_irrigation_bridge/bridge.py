@@ -33,15 +33,6 @@ from db_mysql import (
     telemetry_to_csv_row,
 )
 from db_postgres import PostgresStore, postgres_store_from_env
-from multi_station import (
-    collect_subscribe_topics,
-    parse_device_id_from_payload,
-    parse_device_id_from_topic,
-    provisioning_config_topic,
-    record_provisioning_hello,
-    register_multi_routes,
-)
-from tenant_db import tenant_store_from_env
 
 CSV_HEADER = [
     "crop_name",
@@ -63,8 +54,6 @@ app = Flask(__name__)
 
 _state_lock = threading.Lock()
 _last_state: dict[str, Any] = {}
-_device_states: dict[str, dict[str, Any]] = {}
-_device_rx_at: dict[str, int] = {}
 
 _mqtt_client: mqtt.Client | None = None
 _args_ns: argparse.Namespace | None = None
@@ -231,11 +220,11 @@ def _is_telemetry_topic(topic: str) -> bool:
 
 def _mqtt_subscribe_all(client: mqtt.Client, ns: argparse.Namespace) -> None:
     """Topics exacts seulement (HiveMQ refuse souvent les wildcards + et #)."""
-    tenant = tenant_store_from_env()
-    tel_topics = collect_subscribe_topics(ns.device_id, ns.topic_telemetry, tenant)
-    topics: list[tuple[str, int]] = [(t, 0) for t in tel_topics]
+    topics: list[tuple[str, int]] = [
+        (ns.topic_telemetry, 0),
+    ]
     legacy = _env("MQTT_TOPIC_COMMAND_LEGACY", "irrigation/command/manual")
-    if legacy:
+    if legacy and legacy not in (ns.topic_command,):
         topics.append((legacy, 1))
     seen: set[str] = set()
     for topic, qos in topics:
@@ -247,10 +236,15 @@ def _mqtt_subscribe_all(client: mqtt.Client, ns: argparse.Namespace) -> None:
 
 
 def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> None:
-    global _last_state, _last_mqtt_rx_at, _mqtt_rx_count, _device_states, _device_rx_at
+    global _last_state, _last_mqtt_rx_at, _mqtt_rx_count
     if not _args_ns:
         return
     topic = msg.topic or ""
+    if _is_telemetry_topic(topic):
+        _last_mqtt_rx_at = int(time.time())
+        _mqtt_rx_count += 1
+        if _mqtt_rx_count <= 3 or _mqtt_rx_count % 30 == 0:
+            print(f"[MQTT] RX telemetry #{_mqtt_rx_count} topic={topic!r} len={len(msg.payload)}")
 
     try:
         payload = json.loads(msg.payload.decode("utf-8"))
@@ -261,14 +255,6 @@ def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage
 
     if not isinstance(payload, dict):
         return
-
-    if topic == "irrigation/provisioning/hello" or payload.get("cmd") == "hello":
-        mac = str(payload.get("mac", "") or "").strip()
-        print(f"[MQTT] provisioning hello mac={mac!r}")
-        if mac:
-            record_provisioning_hello(mac, ip=str(payload.get("ip", "")))
-        return
-
     if payload.get("_bridge_ping"):
         global _last_mqtt_loopback_at, _last_mqtt_loopback_try_at
         _last_mqtt_loopback_at = int(time.time())
@@ -281,34 +267,16 @@ def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage
     if topic in (_args_ns.topic_command, _env("MQTT_TOPIC_COMMAND_LEGACY", "irrigation/command/manual")):
         print(f"[MQTT] echo commande sur {topic!r}")
         return
-
-    if _is_telemetry_topic(topic):
-        _last_mqtt_rx_at = int(time.time())
-        _mqtt_rx_count += 1
-        device_id = parse_device_id_from_payload(payload, topic)
-        _device_rx_at[device_id] = _last_mqtt_rx_at
-        if _mqtt_rx_count <= 3 or _mqtt_rx_count % 30 == 0:
-            print(
-                f"[MQTT] RX telemetry #{_mqtt_rx_count} device={device_id!r} "
-                f"topic={topic!r} len={len(msg.payload)}"
-            )
-    else:
+    if not _is_telemetry_topic(topic) or "sensors" not in payload:
         return
-
-    if "sensors" not in payload:
-        return
-
-    device_id = parse_device_id_from_payload(payload, topic)
     with _state_lock:
-        prev = _device_states.get(device_id, {})
         merged = dict(payload)
-        merged["device_id"] = device_id
-        for key in ("decision", "manual", "model_inputs"):
-            if key not in merged and key in prev:
-                merged[key] = prev[key]
+        if _last_state:
+            for key in ("decision", "manual", "model_inputs"):
+                if key not in merged and key in _last_state:
+                    merged[key] = _last_state[key]
         if "decision" not in payload and "sensors" in payload:
-            print(f"[MQTT] telemetry sans bloc decision device={device_id!r}")
-        _device_states[device_id] = merged
+            print("[MQTT] telemetry sans bloc decision (JSON tronque cote ESP ?)")
         _last_state = merged
         payload = merged
 
@@ -319,7 +287,7 @@ def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage
 
     if _pg_store is not None:
         try:
-            _pg_store.insert(row, device_id=device_id)
+            _pg_store.insert(row)
         except Exception as e:
             print("[bridge] Postgres insert:", e)
 
@@ -517,14 +485,6 @@ def bootstrap(argv: list[str] | None = None) -> argparse.Namespace:
         if _bootstrapped and _args_ns is not None:
             return _args_ns
         ns = build_namespace(argv)
-        tenant = tenant_store_from_env()
-        if tenant is not None:
-            try:
-                tenant.ensure_schema()
-                print("[bridge] Schema multi-tenant OK")
-            except Exception as e:
-                print("[bridge] Schema multi-tenant:", e)
-                _bootstrap_notes.append(f"tenant schema: {e}")
         _init_storage(ns)
         _start_mqtt(ns)
         _bootstrapped = True
@@ -570,10 +530,74 @@ def _csv_export_filename(crop: str | None, date_from: date | None, date_to: date
     return "_".join(parts) + ".csv"
 
 
+@app.route("/api/irrigation_log.csv", methods=["GET"])
+def api_irrigation_log_csv() -> Any:
+    store = _get_pg_store()
+    if store is not None:
+        try:
+            crop = request.args.get("crop", "").strip()
+            if crop and crop not in VALID_CROP_NAMES:
+                return jsonify({"error": f"Culture invalide : {crop!r}"}), 400
+            try:
+                date_from = _parse_export_date(request.args.get("from"))
+                date_to = _parse_export_date(request.args.get("to"))
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            if date_from and date_to and date_from > date_to:
+                return jsonify({"error": "La date de debut doit etre <= date de fin"}), 400
+
+            rows = store.fetch_csv_rows_filtered(
+                CSV_EXPORT_HEADER,
+                crop_name=crop or None,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            resp = _csv_response_from_rows(rows, header=CSV_EXPORT_HEADER)
+            resp.headers["X-CSV-Source"] = "database"
+            resp.headers["X-CSV-Rows"] = str(len(rows))
+            resp.headers["Content-Disposition"] = (
+                f'attachment; filename="{_csv_export_filename(crop or None, date_from, date_to)}"'
+            )
+            return resp
+        except Exception as e:
+            return jsonify({"error": f"Lecture base: {e}"}), 500
+
+    if not _args_ns:
+        return jsonify({"error": "Pont non initialise (DATABASE_URL manquant ?)"}), 503
+    path = Path(_args_ns.csv_path).resolve()
+    if not path.is_file():
+        return jsonify({"error": "Fichier CSV introuvable"}), 404
+    return Response(
+        path.read_text(encoding="utf-8"),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=irrigation_log.csv"},
+    )
+
+
 @app.route("/")
 def index() -> Response:
     html_path = Path(__file__).resolve().parent / "dashboard.html"
     return Response(html_path.read_text(encoding="utf-8"), mimetype="text/html; charset=utf-8")
+
+
+@app.route("/api/state", methods=["GET"])
+def api_state() -> Any:
+    with _state_lock:
+        if not _last_state:
+            return jsonify(
+                {
+                    "wifi_connected": False,
+                    "ip": "",
+                    "uptime_s": 0,
+                    "sensors": {},
+                    "weather": {},
+                    "model_inputs": {},
+                    "decision": {"prediction_active": False},
+                    "manual": {"confirmed": False},
+                    "note": "En attente du premier message MQTT (telemetrie).",
+                }
+            )
+        return jsonify(_last_state)
 
 
 @app.route("/api/health", methods=["GET"])
@@ -659,22 +683,11 @@ def api_health() -> Any:
     )
 
 
-def _relay_topic(ns: argparse.Namespace, device_id: str | None = None) -> str:
+def _relay_topic(ns: argparse.Namespace) -> str:
     t = _env("MQTT_TOPIC_RELAY", "").strip()
-    if t and not device_id:
+    if t:
         return t
-    did = device_id or ns.device_id
-    return f"irrigation/{did}/command/relay"
-
-
-def _command_topics_for_device(ns: argparse.Namespace, device_id: str) -> list[str]:
-    topics = [f"irrigation/{device_id}/command/manual"]
-    legacy = _env("MQTT_TOPIC_COMMAND_LEGACY", "irrigation/command/manual")
-    if legacy and legacy not in topics:
-        topics.append(legacy)
-    if device_id == ns.device_id and ns.topic_command not in topics:
-        topics.insert(0, ns.topic_command)
-    return topics
+    return f"irrigation/{ns.device_id}/command/relay"
 
 
 def _command_topics(ns: argparse.Namespace) -> list[str]:
@@ -710,26 +723,23 @@ def _mqtt_publish_one(topic: str, body: str, qos: int = 1) -> dict[str, Any]:
     return {"topic": topic, "mqtt_rc": int(info.rc), "published": published, "qos": qos}
 
 
-def _mqtt_publish_manual(
-    age: int, ci: int, si: int, device_id: str | None = None
-) -> tuple[list[dict[str, Any]], str, str]:
+def _mqtt_publish_manual(age: int, ci: int, si: int) -> tuple[list[dict[str, Any]], str, str]:
     global _last_manual_publish
     assert _args_ns is not None
-    did = (device_id or _args_ns.device_id or "station01").strip()
     body_cmd = json.dumps({"crop_age_days": age, "crop_idx": ci, "soil_idx": si})
     body_relay = json.dumps({"cmd": "manual", "crop_age_days": age, "crop_idx": ci, "soil_idx": si})
     results: list[dict[str, Any]] = []
-    relay_topic = _relay_topic(_args_ns, did)
-    cmd_topics = _command_topics_for_device(_args_ns, did)
+    relay_topic = _relay_topic(_args_ns)
 
     r_relay = _mqtt_publish_one(relay_topic, body_relay, qos=1)
     results.append(r_relay)
     if not r_relay.get("published"):
-        for topic in cmd_topics:
+        for topic in _command_topics(_args_ns):
             results.append(_mqtt_publish_one(topic, body_cmd, qos=1))
     else:
-        for topic in cmd_topics:
-            results.append(_mqtt_publish_one(topic, body_cmd, qos=1))
+        for topic in _command_topics(_args_ns):
+            body = body_cmd
+            results.append(_mqtt_publish_one(topic, body, qos=1))
 
     _last_manual_publish = {
         "body_cmd": body_cmd,
@@ -740,7 +750,8 @@ def _mqtt_publish_manual(
     return results, body_cmd, body_relay
 
 
-def _api_manual_impl() -> Any:
+@app.route("/api/manual", methods=["POST"])
+def api_manual() -> Any:
     if not _mqtt_client or not _args_ns:
         return jsonify({"ok": False, "error": "MQTT non initialise"}), 503
     if not _mqtt_client.is_connected():
@@ -756,24 +767,9 @@ def _api_manual_impl() -> Any:
     if ci < 0 or ci > 3 or si < 0 or si > 3:
         return jsonify({"ok": False, "error": "culture et sol : indices 0-3"}), 400
 
-    device_id = (
-        request.form.get("device_id")
-        or request.args.get("device")
-        or _env("DEVICE_ID", "station01")
-    ).strip()
-    from auth_supabase import auth_enabled
-    from multi_station import check_device_access, get_bearer_user, tenant_store_from_env
-
-    if auth_enabled():
-        user = get_bearer_user()
-        if not user:
-            return jsonify({"ok": False, "error": "Authentification requise"}), 401
-        tenant = tenant_store_from_env()
-        if not check_device_access(user["id"], device_id, tenant):
-            return jsonify({"ok": False, "error": "Acces refuse a cette station"}), 403
-    results, body_cmd, body_relay = _mqtt_publish_manual(age, ci, si, device_id)
+    results, body_cmd, body_relay = _mqtt_publish_manual(age, ci, si)
     ok = any(r.get("published") for r in results)
-    relay_topic = _relay_topic(_args_ns, device_id)
+    relay_topic = _relay_topic(_args_ns)
     via = "relay" if any(r.get("published") and r.get("topic") == relay_topic for r in results) else "command"
     if not ok:
         return jsonify(
@@ -799,45 +795,12 @@ def _api_manual_impl() -> Any:
     )
 
 
-@app.route("/api/manual", methods=["POST"])
-def api_manual() -> Any:
-    return _api_manual_impl()
-
-
 def main() -> None:
     ns = bootstrap(sys.argv[1:])
     print(f"[bridge] Dashboard : http://{ns.http_host}:{ns.http_port}/")
     print(f"[bridge] MQTT {ns.mqtt_host}:{ns.mqtt_port} tls={ns.mqtt_tls}")
     app.run(host=ns.http_host, port=ns.http_port, debug=False, threaded=True)
 
-
-def _health_snapshot() -> dict[str, Any]:
-    mqtt_ok = False
-    if _mqtt_client is not None:
-        try:
-            mqtt_ok = bool(_mqtt_client.is_connected())
-        except Exception:
-            mqtt_ok = False
-    return {
-        "mqtt": mqtt_ok,
-        "last_mqtt_rx_at": _last_mqtt_rx_at,
-        "mqtt_rx_count": _mqtt_rx_count,
-    }
-
-
-register_multi_routes(
-    app,
-    get_states=lambda: _device_states,
-    state_lock=_state_lock,
-    get_mqtt_publish=_mqtt_publish_one,
-    get_pg_store=_get_pg_store,
-    get_default_device=lambda: (_args_ns.device_id if _args_ns else _env("DEVICE_ID", "station01")),
-    csv_export_header=CSV_EXPORT_HEADER,
-    parse_export_date=_parse_export_date,
-    csv_export_filename=_csv_export_filename,
-    csv_response_from_rows=_csv_response_from_rows,
-    get_health_snapshot=_health_snapshot,
-)
 
 # Gunicorn (Render) importe ce module : ne pas lire sys.argv (contient "bridge:app", --bind, etc.)
 if __name__ != "__main__":

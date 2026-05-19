@@ -3,8 +3,6 @@
 #include <stdio.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
-#include "device_config.h"
-#include "wifi_provision.h"
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <DHT.h>
@@ -675,22 +673,32 @@ void setup() {
   Serial.println(F("Saisie: A <jours> | C <0-3> | S <0-3> | M (test MQTT) | H"));
   Serial.println(F("Prediction MLP desactivee tant que la saisie n'est pas confirmee (MQTT depuis le PC, formulaire du dashboard local, ou A/C/S au moniteur serie)."));
 
-  device_config_begin();
-  if (wifi_provision_connect()) {
-    if (fetch_geo_ip()) {
-      Serial.print(F("Zone IP lat="));
-      Serial.print(g_lat, 4);
-      Serial.print(F(" lon="));
-      Serial.println(g_lon, 4);
-      fetch_open_meteo();
-    }
+  if (strlen(WIFI_SSID) > 0) {
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    Serial.print(F("Connexion WiFi SSID="));
+    Serial.println(WIFI_SSID);
+    uint32_t t0 = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) delay(300);
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.print(F("WiFi OK, IP="));
+      Serial.println(WiFi.localIP());
+      if (fetch_geo_ip()) {
+        Serial.print(F("Zone IP lat="));
+        Serial.print(g_lat, 4);
+        Serial.print(F(" lon="));
+        Serial.println(g_lon, 4);
+        fetch_open_meteo();
+      }
 #if ENABLE_WEB_DASHBOARD
-    web_begin_if_wifi();
+      web_begin_if_wifi();
 #endif
-  } else if (wifi_provision_portal_active()) {
-    Serial.println(F("Portail WiFi actif : connectez le telephone a Irrigation-Setup puis 192.168.4.1"));
+    } else {
+      Serial.println(F("WiFi non connecte apres 15s: meteo station indisponible"));
+    }
   } else {
-    Serial.println(F("WiFi non connecte : configurez weather_secrets.h ou le portail"));
+      Serial.println(F("Renseignez weather_secrets.h pour activer la meteo station"));
   }
 #if ENABLE_MQTT
   mqtt_irrigation_begin();
@@ -702,11 +710,6 @@ void setup() {
 
 void loop() {
   poll_user_serial();
-  wifi_provision_loop();
-  if (wifi_provision_portal_active()) {
-    delay(10);
-    return;
-  }
 
 #if ENABLE_DATASET_LOG
   if (WiFi.status() == WL_CONNECTED) dataset_log_poll_ntp();
