@@ -110,13 +110,45 @@ def _telemetry_is_stale() -> bool:
     return age > _telemetry_stale_seconds()
 
 
-def _offline_state_payload(*, note: str, age_s: int | None = None) -> dict[str, Any]:
+def _bridge_mqtt_connected() -> bool:
+    if _mqtt_client is None:
+        return False
+    try:
+        return bool(_mqtt_client.is_connected())
+    except Exception:
+        return False
+
+
+def _offline_diagnostic_hint(*, age_s: int | None, bridge_mqtt: bool) -> str:
+    if not bridge_mqtt:
+        return (
+            "Le pont Render n'est pas connecte a HiveMQ — redeployez le service ou verifiez "
+            "MQTT_HOST / MQTT_USER / MQTT_PASSWORD sur Render."
+        )
+    if age_s is not None and age_s > _telemetry_stale_seconds():
+        return (
+            "L'ESP tourne peut-etre en local mais n'envoie pas sur HiveMQ. Moniteur serie : "
+            "cherchez [MQTT] Connecte a HiveMQ puis [MQTT] OK publie (ou M pour test). "
+            "Sinon : WiFi, MQTT_PASSWORD dans weather_secrets.h, PUBLISH sur irrigation/station01/telemetry."
+        )
+    return "En attente de la premiere telemetrie MQTT depuis l'ESP32."
+
+
+def _offline_state_payload(
+    *,
+    note: str,
+    age_s: int | None = None,
+    bridge_mqtt: bool | None = None,
+) -> dict[str, Any]:
     stale_s = _telemetry_stale_seconds()
+    bmqtt = _bridge_mqtt_connected() if bridge_mqtt is None else bridge_mqtt
     return {
         "esp_online": False,
         "telemetry_stale": True,
         "telemetry_age_s": age_s,
         "telemetry_stale_seconds": stale_s,
+        "bridge_mqtt": bmqtt,
+        "diagnostic_hint": _offline_diagnostic_hint(age_s=age_s, bridge_mqtt=bmqtt),
         "wifi_connected": False,
         "ip": "",
         "uptime_s": 0,
@@ -466,6 +498,34 @@ def _mqtt_restart(ns: argparse.Namespace) -> mqtt.Client | None:
     return _start_mqtt(ns)
 
 
+def _schedule_mqtt_reconnect_if_needed(ns: argparse.Namespace | None) -> None:
+    """Si le client MQTT du pont est coupe, redemarrer en arriere-plan (messages retainus au resubscribe)."""
+    if ns is None or not _mqtt_configured():
+        return
+    if _bridge_mqtt_connected():
+        return
+    now = int(time.time())
+    if now - _last_mqtt_restart_at < 25:
+        return
+    with _mqtt_maint_lock:
+        if _mqtt_maint_running:
+            return
+
+    def _work() -> None:
+        global _mqtt_maint_running
+        with _mqtt_maint_lock:
+            _mqtt_maint_running = True
+        try:
+            if not _bridge_mqtt_connected():
+                print("[MQTT] pont deconnecte — reconnexion...")
+                _mqtt_restart(ns)
+        finally:
+            with _mqtt_maint_lock:
+                _mqtt_maint_running = False
+
+    threading.Thread(target=_work, daemon=True, name="mqtt-reconnect").start()
+
+
 def _wait_mqtt_connected(client: mqtt.Client, timeout_s: float = 12.0) -> bool:
     deadline = time.time() + timeout_s
     while time.time() < deadline:
@@ -496,6 +556,10 @@ def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client | None:
             print(f"[MQTT] connexion refusee, code {rc}")
             _bootstrap_notes.append(f"MQTT on_connect rc={rc}")
 
+    def on_disconnect(_client: mqtt.Client, _userdata: Any, rc: int) -> None:
+        if rc != 0:
+            print(f"[MQTT] deconnecte (rc={rc}) — reconnexion au prochain health check")
+
     def on_subscribe(_client: mqtt.Client, _userdata: Any, mid: int, granted_qos: list[int]) -> None:
         global _mqtt_sub_errors, _mqtt_sub_ok
         print(f"[MQTT] on_subscribe mid={mid} qos={granted_qos}")
@@ -514,8 +578,10 @@ def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client | None:
     cid = f"{ns.mqtt_client_id}_{int(time.time()) % 100000}"
     client = mqtt.Client(client_id=cid, clean_session=True)
     client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.on_subscribe = on_subscribe
     client.on_message = _on_mqtt_message
+    client.reconnect_delay_set(min_delay=1, max_delay=30)
     if ns.mqtt_user:
         client.username_pw_set(ns.mqtt_user, ns.mqtt_password or None)
     if ns.mqtt_tls:
@@ -687,6 +753,10 @@ def index() -> Response:
 @app.route("/api/state", methods=["GET"])
 def api_state() -> Any:
     stale_s = _telemetry_stale_seconds()
+    ns = _args_ns
+    if ns is not None:
+        _schedule_mqtt_reconnect_if_needed(ns)
+    bridge_mqtt = _bridge_mqtt_connected()
     with _state_lock:
         if not _last_state:
             return jsonify(
@@ -700,9 +770,10 @@ def api_state() -> Any:
                 _offline_state_payload(
                     note=(
                         f"ESP hors ligne — derniere telemetrie il y a {age}s "
-                        f"(seuil {stale_s}s). Branchez ou redemarrez l'ESP32."
+                        f"(seuil {stale_s}s). Verifiez MQTT sur l'ESP (moniteur serie)."
                     ),
                     age_s=age,
+                    bridge_mqtt=bridge_mqtt,
                 )
             )
         out = dict(_last_state)
@@ -710,6 +781,7 @@ def api_state() -> Any:
         out["telemetry_stale"] = False
         out["telemetry_age_s"] = _telemetry_age_seconds()
         out["telemetry_stale_seconds"] = stale_s
+        out["bridge_mqtt"] = bridge_mqtt
         return jsonify(out)
 
 
@@ -733,6 +805,9 @@ def api_health() -> Any:
     ns = _args_ns
     now = int(time.time())
     loopback_ok = _last_mqtt_loopback_at > 0
+    if ns is not None:
+        _schedule_mqtt_reconnect_if_needed(ns)
+        mqtt_ok = _bridge_mqtt_connected()
     if mqtt_ok and _mqtt_client is not None and ns:
         _run_mqtt_maintenance_if_needed(ns, mqtt_ok)
 
@@ -789,6 +864,10 @@ def api_health() -> Any:
             "mqtt_rx_count": _mqtt_rx_count,
             "mqtt_rx_hint": rx_hint,
             "last_manual_publish": _last_manual_publish,
+            "diagnostic_hint": _offline_diagnostic_hint(
+                age_s=tel_age,
+                bridge_mqtt=mqtt_ok,
+            ),
             "notes": _bootstrap_notes[-5:],
         }
     )

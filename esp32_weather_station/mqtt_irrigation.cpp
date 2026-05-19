@@ -287,6 +287,7 @@ void mqtt_irrigation_loop() {
     uint32_t ms = millis();
     if (ms - s_last_reconnect_ms < 3000UL) return;
     s_last_reconnect_ms = ms;
+    Serial.println(F("[MQTT] Reconnexion HiveMQ..."));
     mqtt_connect();
     return;
   }
@@ -325,9 +326,11 @@ void mqtt_irrigation_publish_state(
   if (strlen(MQTT_BROKER_HOST) == 0) return;
   if (!s_mqtt.connected()) {
     uint32_t ms = millis();
-    if (ms - s_last_publish_skip_log_ms >= 30000UL) {
+    if (ms - s_last_publish_skip_log_ms >= 10000UL) {
       s_last_publish_skip_log_ms = ms;
-      Serial.println(F("[MQTT] Telemetrie non envoyee: MQTT deconnecte (WiFi OK mais pas HiveMQ)."));
+      Serial.print(F("[MQTT] Telemetrie non envoyee: pas connecte a HiveMQ (state="));
+      Serial.print(s_mqtt.state());
+      Serial.println(F("). Tapez M pour test, verifiez MQTT_USER/PASSWORD dans weather_secrets.h"));
     }
     return;
   }
