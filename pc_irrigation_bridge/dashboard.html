@@ -291,7 +291,12 @@ document.getElementById("f").onsubmit=async (e)=>{
   const body=new URLSearchParams({crop_age_days:age,crop_idx:ci,soil_idx:si});
   try{
     const r=await fetch(window.location.origin+"/api/manual",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
-    const t=await readJson(r);
+    let t;
+    try{ t=await readJson(r); }catch(parseErr){
+      msg.classList.add("err");
+      msg.textContent="Erreur reseau : "+(parseErr&&parseErr.message?parseErr.message:String(parseErr));
+      return;
+    }
     if(r.ok&&t&&t.ok){
       formDirty=false;
       msg.textContent="Saisie mise a jour.";
@@ -359,7 +364,7 @@ document.getElementById("csv_export").onsubmit=async function(e){
   }
 };
 bindManualFormGuard();
-setInterval(poll,2000);
+setInterval(poll,4000);
 poll();
 </script>
 </body>

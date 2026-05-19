@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, Response, jsonify, request
+from werkzeug.exceptions import HTTPException
 import paho.mqtt.client as mqtt
 
 from db_mysql import (
@@ -52,6 +53,17 @@ CSV_EXPORT_HEADER = ["recorded_at", *CSV_HEADER]
 
 app = Flask(__name__)
 
+
+@app.errorhandler(Exception)
+def _json_server_error(exc: Exception) -> Any:
+    if isinstance(exc, HTTPException):
+        raise exc
+    if request.path.startswith("/api/"):
+        print(f"[bridge] erreur API {request.path}: {exc}")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    raise exc
+
+
 _state_lock = threading.Lock()
 _last_state: dict[str, Any] = {}
 
@@ -72,6 +84,11 @@ _last_mqtt_restart_at: int = 0
 _mqtt_sub_errors: list[str] = []
 _mqtt_sub_ok: list[str] = []
 _mqtt_thread: threading.Thread | None = None
+_mqtt_maint_lock = threading.Lock()
+_mqtt_maint_running = False
+
+# Render coupe souvent les requetes HTTP a ~30 s ; rester en dessous par publication.
+_MQTT_PUBACK_TIMEOUT_S = 6.0
 
 
 def _env(key: str, default: str = "") -> str:
@@ -305,6 +322,55 @@ def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage
 
 def _mqtt_configured() -> bool:
     return bool(_env("MQTT_HOST") or _env("MQTT_BROKER_HOST"))
+
+
+def _run_mqtt_maintenance_if_needed(ns: argparse.Namespace, mqtt_ok: bool) -> None:
+    """Loopback / redemarrage MQTT hors requete HTTP (evite timeout Render sur /api/health)."""
+    global _mqtt_maint_running
+    if not mqtt_ok or _mqtt_client is None or _last_mqtt_rx_at != 0:
+        return
+    now = int(time.time())
+    need_resub = now - _last_mqtt_resubscribe_at >= 45
+    need_loopback = _last_mqtt_loopback_try_at == 0 or now - _last_mqtt_loopback_try_at >= 90
+    need_restart = (
+        not (_last_mqtt_loopback_at > 0)
+        and (now - _last_mqtt_restart_at >= 120 or _last_mqtt_restart_at == 0)
+    )
+    if not (need_resub or need_loopback or need_restart):
+        return
+
+    with _mqtt_maint_lock:
+        if _mqtt_maint_running:
+            return
+        _mqtt_maint_running = True
+
+    def _work() -> None:
+        global _mqtt_maint_running, _last_mqtt_resubscribe_at, _last_mqtt_loopback_try_at
+        try:
+            client = _mqtt_client
+            if client is None:
+                return
+            n = int(time.time())
+            if n - _last_mqtt_resubscribe_at >= 45:
+                _last_mqtt_resubscribe_at = n
+                try:
+                    _mqtt_subscribe_all(client, ns)
+                    print("[MQTT] re-abonnement telemetry (arriere-plan)")
+                except Exception as e:
+                    print("[MQTT] re-abonnement echoue:", e)
+            if _last_mqtt_loopback_try_at == 0 or n - _last_mqtt_loopback_try_at >= 90:
+                _mqtt_try_loopback()
+            if not (_last_mqtt_loopback_at > 0) and (
+                n - _last_mqtt_restart_at >= 120 or _last_mqtt_restart_at == 0
+            ):
+                _mqtt_restart(ns)
+                if _last_mqtt_loopback_try_at == 0 or n - _last_mqtt_loopback_try_at >= 90:
+                    _mqtt_try_loopback()
+        finally:
+            with _mqtt_maint_lock:
+                _mqtt_maint_running = False
+
+    threading.Thread(target=_work, daemon=True, name="mqtt-maint").start()
 
 
 def _mqtt_try_loopback() -> bool:
@@ -620,22 +686,8 @@ def api_health() -> Any:
     ns = _args_ns
     now = int(time.time())
     loopback_ok = _last_mqtt_loopback_at > 0
-    if mqtt_ok and _mqtt_client is not None and ns and _last_mqtt_rx_at == 0:
-        global _last_mqtt_resubscribe_at, _last_mqtt_loopback_try_at, _last_mqtt_restart_at
-        if now - _last_mqtt_resubscribe_at >= 45:
-            _last_mqtt_resubscribe_at = now
-            try:
-                _mqtt_subscribe_all(_mqtt_client, ns)
-                print("[MQTT] re-abonnement telemetry")
-            except Exception as e:
-                print("[MQTT] re-abonnement echoue:", e)
-        if _last_mqtt_loopback_try_at == 0 or now - _last_mqtt_loopback_try_at >= 90:
-            loopback_ok = _mqtt_try_loopback() or (_last_mqtt_loopback_at > 0)
-        if not loopback_ok and (now - _last_mqtt_restart_at >= 120 or _last_mqtt_restart_at == 0):
-            _mqtt_restart(ns)
-            mqtt_ok = bool(_mqtt_client and _mqtt_client.is_connected())
-            if _last_mqtt_loopback_try_at == 0 or now - _last_mqtt_loopback_try_at >= 90:
-                loopback_ok = _mqtt_try_loopback() or (_last_mqtt_loopback_at > 0)
+    if mqtt_ok and _mqtt_client is not None and ns:
+        _run_mqtt_maintenance_if_needed(ns, mqtt_ok)
 
     rx_hint = ""
     if mqtt_ok and _last_mqtt_rx_at == 0:
@@ -714,11 +766,14 @@ def _mqtt_publish_one(topic: str, body: str, qos: int = 1) -> dict[str, Any]:
         return {"topic": topic, "mqtt_rc": int(info.rc), "published": False, "qos": qos}
 
     published = False
-    deadline = time.time() + 15.0
+    deadline = time.time() + _MQTT_PUBACK_TIMEOUT_S
     while time.time() < deadline:
         time.sleep(0.05)
-        if info.is_published():
-            published = True
+        try:
+            if info.is_published():
+                published = True
+                break
+        except Exception:
             break
     return {"topic": topic, "mqtt_rc": int(info.rc), "published": published, "qos": qos}
 
@@ -733,13 +788,11 @@ def _mqtt_publish_manual(age: int, ci: int, si: int) -> tuple[list[dict[str, Any
 
     r_relay = _mqtt_publish_one(relay_topic, body_relay, qos=1)
     results.append(r_relay)
-    if not r_relay.get("published"):
-        for topic in _command_topics(_args_ns):
-            results.append(_mqtt_publish_one(topic, body_cmd, qos=1))
+    if r_relay.get("published"):
+        pass
     else:
         for topic in _command_topics(_args_ns):
-            body = body_cmd
-            results.append(_mqtt_publish_one(topic, body, qos=1))
+            results.append(_mqtt_publish_one(topic, body_cmd, qos=1))
 
     _last_manual_publish = {
         "body_cmd": body_cmd,
@@ -752,47 +805,57 @@ def _mqtt_publish_manual(age: int, ci: int, si: int) -> tuple[list[dict[str, Any
 
 @app.route("/api/manual", methods=["POST"])
 def api_manual() -> Any:
-    if not _mqtt_client or not _args_ns:
-        return jsonify({"ok": False, "error": "MQTT non initialise"}), 503
-    if not _mqtt_client.is_connected():
-        return jsonify({"ok": False, "error": "MQTT deconnecte (reessayez dans 10 s)"}), 503
     try:
-        age = int(request.form.get("crop_age_days", 0))
-        ci = int(request.form.get("crop_idx", ""))
-        si = int(request.form.get("soil_idx", ""))
-    except (TypeError, ValueError):
-        return jsonify({"ok": False, "error": "Champs invalides (age, culture, sol)"}), 400
-    if age < 1 or age > 120:
-        return jsonify({"ok": False, "error": "age doit etre entre 1 et 120"}), 400
-    if ci < 0 or ci > 3 or si < 0 or si > 3:
-        return jsonify({"ok": False, "error": "culture et sol : indices 0-3"}), 400
+        if not _bootstrapped:
+            bootstrap([])
+        if not _mqtt_client or not _args_ns:
+            return jsonify({"ok": False, "error": "MQTT non initialise"}), 503
+        try:
+            connected = bool(_mqtt_client.is_connected())
+        except Exception:
+            connected = False
+        if not connected:
+            return jsonify({"ok": False, "error": "MQTT deconnecte (reessayez dans 10 s)"}), 503
+        try:
+            age = int(request.form.get("crop_age_days", 0))
+            ci = int(request.form.get("crop_idx", ""))
+            si = int(request.form.get("soil_idx", ""))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "Champs invalides (age, culture, sol)"}), 400
+        if age < 1 or age > 120:
+            return jsonify({"ok": False, "error": "age doit etre entre 1 et 120"}), 400
+        if ci < 0 or ci > 3 or si < 0 or si > 3:
+            return jsonify({"ok": False, "error": "culture et sol : indices 0-3"}), 400
 
-    results, body_cmd, body_relay = _mqtt_publish_manual(age, ci, si)
-    ok = any(r.get("published") for r in results)
-    relay_topic = _relay_topic(_args_ns)
-    via = "relay" if any(r.get("published") and r.get("topic") == relay_topic for r in results) else "command"
-    if not ok:
+        results, body_cmd, body_relay = _mqtt_publish_manual(age, ci, si)
+        ok = any(r.get("published") for r in results)
+        relay_topic = _relay_topic(_args_ns)
+        via = "relay" if any(r.get("published") and r.get("topic") == relay_topic for r in results) else "command"
+        if not ok:
+            return jsonify(
+                {
+                    "ok": False,
+                    "via": via,
+                    "topics": results,
+                    "payload": json.loads(body_cmd),
+                    "error": (
+                        "Publish MQTT refuse par HiveMQ (PUBLISH sur command/relay). "
+                        "Permissions : irrigation/station01/command/# et irrigation/command/manual"
+                    ),
+                }
+            ), 502
         return jsonify(
             {
-                "ok": False,
+                "ok": True,
                 "via": via,
                 "topics": results,
                 "payload": json.loads(body_cmd),
-                "error": (
-                    "Publish MQTT refuse par HiveMQ (PUBLISH sur command/relay). "
-                    "Permissions : irrigation/station01/command/# et irrigation/command/manual"
-                ),
+                "hint": "Moniteur ESP : [MQTT] RX topic=... puis Saisie manuelle appliquee (~5 s)",
             }
-        ), 502
-    return jsonify(
-        {
-            "ok": True,
-            "via": via,
-            "topics": results,
-            "payload": json.loads(body_cmd),
-            "hint": "Moniteur ESP : [MQTT] RX topic=... puis Saisie manuelle appliquee (~5 s)",
-        }
-    )
+        )
+    except Exception as e:
+        print("[bridge] api_manual:", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 def main() -> None:
