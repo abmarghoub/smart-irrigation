@@ -50,6 +50,14 @@ code{font-size:.85em}
 </style>
 </head>
 <body>
+<div id="userbar" style="margin-bottom:.75rem;font-size:.88rem;color:var(--muted)">
+<span id="user_email"></span>
+<label style="display:inline;margin-left:.75rem">Station</label>
+<select id="device_sel" style="width:auto;display:inline-block;padding:.25rem .5rem"></select>
+<a href="/login" id="link_login" style="margin-left:.5rem">Connexion</a>
+<a href="/admin" id="link_admin" style="margin-left:.5rem;display:none">Admin</a>
+<button type="button" class="secondary" id="btn_logout" style="display:none;margin-top:0;padding:.25rem .6rem">Deconnexion</button>
+</div>
 <h1>Station d'irrigation</h1>
 <p id="poll_err"></p>
 
@@ -128,8 +136,58 @@ code{font-size:.85em}
 <div class="grid" id="cards"><div class="card"><h2>En attente</h2><div class="val">—<small> </small></div></div></div>
 <p id="lastupd"></p>
 
-<footer>Mise a jour toutes les 2 secondes</footer>
+<div class="panel" style="margin-top:1rem;max-width:420px">
+<h2 style="margin:0 0 .5rem;font-size:1rem">Compte station</h2>
+<p class="sub" style="margin:0 0 .5rem">Transfert (vente) : libere la carte pour un autre utilisateur. Reactivation : apres reset usine sur la carte.</p>
+<button type="button" class="secondary" id="btn_transfer">Transferer ma station</button>
+<button type="button" class="secondary" id="btn_reactivate" style="margin-left:.5rem">Reactiver (MAC)</button>
+<p id="account_msg" style="font-size:.85rem;margin-top:.5rem"></p>
+</div>
+
+<footer>Mise a jour toutes les 2 secondes · <a href="/provision">Inscription</a></footer>
 <script>
+const authToken=()=>sessionStorage.getItem("irrigation_token")||"";
+let currentDevice="";
+let authEnabled=false;
+async function authFetch(url,opts={}){
+  opts.headers=Object.assign({},opts.headers||{});
+  if(authToken()) opts.headers["Authorization"]="Bearer "+authToken();
+  return fetch(url,opts);
+}
+function selectedDevice(){
+  const sel=document.getElementById("device_sel");
+  return (sel&&sel.value)||currentDevice||"";
+}
+async function initAuth(){
+  const cfg=await fetch("/api/auth/config").then(r=>r.json()).catch(()=>({}));
+  authEnabled=!!cfg.auth_enabled;
+  const linkLogin=document.getElementById("link_login");
+  const btnOut=document.getElementById("btn_logout");
+  const linkAdmin=document.getElementById("link_admin");
+  if(!authEnabled){
+    document.getElementById("user_email").textContent="Mode local (auth desactivee)";
+    linkLogin.style.display="none";
+    const sel=document.getElementById("device_sel");
+    if(sel){ sel.innerHTML='<option value="station01">station01</option>'; sel.value="station01"; }
+    currentDevice="station01";
+    return;
+  }
+  if(!authToken()){ location.href="/login?next=/"; return; }
+  linkLogin.style.display="none";
+  btnOut.style.display="inline-block";
+  btnOut.onclick=()=>{ sessionStorage.removeItem("irrigation_token"); location.href="/login"; };
+  const me=await authFetch("/api/me");
+  if(!me.ok){ sessionStorage.removeItem("irrigation_token"); location.href="/login"; return; }
+  const u=await me.json();
+  document.getElementById("user_email").textContent=u.email||"";
+  if(u.is_admin) linkAdmin.style.display="inline";
+  const sel=document.getElementById("device_sel");
+  const devs=u.devices||[];
+  sel.innerHTML="";
+  devs.forEach(d=>{ const o=document.createElement("option"); o.value=d; o.textContent=d; sel.appendChild(o); });
+  if(devs.length) currentDevice=devs[0];
+  sel.onchange=()=>{ currentDevice=sel.value; poll(); };
+}
 const CROP_L=["Maize","Rice","Tomato","Wheat"];
 const SOIL_L=["Clayey","Loamy","Sandy","Silty"];
 const el=(h,t,v,u)=>`<div class="card"><h2>${h}</h2><div class="val">${v}<small> ${u||""}</small></div></div>`;
@@ -193,8 +251,10 @@ async function poll(){
   const base=window.location.origin;
   try{
     errEl.textContent="";
+    const dev=selectedDevice();
+    const q=dev?"?device="+encodeURIComponent(dev):"";
     const [r,rh]=await Promise.all([
-      fetch(base+"/api/state",{cache:"no-store"}),
+      authFetch(base+"/api/state"+q,{cache:"no-store"}),
       fetch(base+"/api/health",{cache:"no-store"})
     ]);
     if(!r.ok){ errEl.textContent="Erreur /api/state HTTP "+r.status; return; }
@@ -288,9 +348,9 @@ document.getElementById("f").onsubmit=async (e)=>{
   }
   msg.textContent="";
   msg.classList.remove("err");
-  const body=new URLSearchParams({crop_age_days:age,crop_idx:ci,soil_idx:si});
+  const body=new URLSearchParams({crop_age_days:age,crop_idx:ci,soil_idx:si,device_id:selectedDevice()});
   try{
-    const r=await fetch(window.location.origin+"/api/manual",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
+    const r=await authFetch(window.location.origin+"/api/manual",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
     const t=await readJson(r);
     if(r.ok&&t&&t.ok){
       formDirty=false;
@@ -316,6 +376,8 @@ document.getElementById("csv_export").onsubmit=async function(e){
   const from=document.getElementById("csv_from").value;
   const to=document.getElementById("csv_to").value;
   const q=new URLSearchParams();
+  const dev=selectedDevice();
+  if(dev) q.set("device",dev);
   if(crop) q.set("crop",crop);
   if(from) q.set("from",from);
   if(to) q.set("to",to);
@@ -326,7 +388,7 @@ document.getElementById("csv_export").onsubmit=async function(e){
   const qs=q.toString();
   const u=window.location.origin+"/api/irrigation_log.csv"+(qs?"?"+qs:"");
   try{
-    const r=await fetch(u,{cache:"no-store"});
+    const r=await authFetch(u,{cache:"no-store"});
     const ct=(r.headers.get("Content-Type")||"").toLowerCase();
     if(!r.ok){
       let t="";
@@ -359,8 +421,25 @@ document.getElementById("csv_export").onsubmit=async function(e){
   }
 };
 bindManualFormGuard();
-setInterval(poll,2000);
-poll();
+document.getElementById("btn_transfer").onclick=async()=>{
+  if(!confirm("Transferer cette station ? Vous ne la verrez plus.")) return;
+  const msg=document.getElementById("account_msg");
+  const r=await authFetch("/api/device/transfer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({device_id:selectedDevice()})});
+  const j=await r.json();
+  msg.textContent=r.ok?"Station liberee.":(j.error||"Echec");
+};
+document.getElementById("btn_reactivate").onclick=async()=>{
+  const mac=prompt("MAC de la carte (AA:BB:CC:DD:EE:FF):");
+  if(!mac) return;
+  const msg=document.getElementById("account_msg");
+  const r=await authFetch("/api/device/reactivate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mac})});
+  const j=await r.json();
+  msg.textContent=r.ok?("OK device_id="+j.device_id):(j.error||"Echec");
+};
+initAuth().then(()=>{
+  setInterval(poll,2000);
+  poll();
+});
 </script>
 </body>
 </html>

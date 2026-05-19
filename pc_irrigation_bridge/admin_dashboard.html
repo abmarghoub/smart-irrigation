@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Admin — Irrigation</title>
+<style>
+:root{--bg:#0f1419;--card:#1a2332;--txt:#e7ecf3;--muted:#8b9cb3;--acc:#3d9cf9;--ok:#34c759;--warn:#f0ad4e}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--txt);padding:1rem;max-width:1100px;margin-inline:auto}
+h1{font-size:1.25rem}
+.sub{color:var(--muted);font-size:.85rem;margin-bottom:1rem}
+table{width:100%;border-collapse:collapse;font-size:.85rem;margin:.5rem 0 1rem}
+th,td{border:1px solid #2a3544;padding:.45rem .5rem;text-align:left}
+th{background:#1a2332;color:var(--muted);font-weight:600}
+button{padding:.4rem .75rem;border:none;border-radius:6px;background:var(--acc);color:#fff;cursor:pointer;font-size:.8rem}
+button.danger{background:#c44}
+button.secondary{background:#2a3544}
+#msg{margin:.75rem 0;min-height:1.2em;font-size:.9rem}
+#msg.err{color:#ff6b6b}
+a{color:var(--acc)}
+.sec{margin:1.5rem 0 .5rem;font-size:1rem;border-bottom:1px solid #2a3544;padding-bottom:.35rem}
+</style>
+</head>
+<body>
+<h1>Administration stations</h1>
+<p class="sub">Validez les inscriptions, assignez les <code>device_id</code>, consultez l’état MQTT. <a href="/">Dashboard client</a> · <a href="/login">Connexion</a></p>
+<p id="msg"></p>
+
+<h2 class="sec">Demandes en attente</h2>
+<div id="pending_wrap"><p class="sub">Chargement…</p></div>
+<h2 class="sec">Cartes vues récemment (hello MQTT)</h2>
+<div id="hello_wrap"><p class="sub">—</p></div>
+<h2 class="sec">Stations enregistrées</h2>
+<div id="devices_wrap"><p class="sub">Chargement…</p></div>
+
+<script>
+function token(){ return sessionStorage.getItem("irrigation_token")||""; }
+function authHeaders(){
+  const t=token();
+  const h={"Content-Type":"application/json"};
+  if(t) h["Authorization"]="Bearer "+t;
+  return h;
+}
+function showMsg(t,err){ const m=document.getElementById("msg"); m.textContent=t; m.className=err?"err":""; }
+async function readJson(r){
+  const text=await r.text();
+  try{return JSON.parse(text);}catch(_){ throw new Error("HTTP "+r.status); }
+}
+async function ensureAdmin(){
+  const cfg=await fetch("/api/auth/config").then(r=>r.json()).catch(()=>({}));
+  if(cfg.auth_enabled===false){ showMsg("Auth desactivee — acces admin local.",false); return true; }
+  if(!token()){ location.href="/login?next=/admin"; return false; }
+  const me=await fetch("/api/me",{headers:authHeaders()});
+  if(!me.ok){ location.href="/login?next=/admin"; return false; }
+  const j=await readJson(me);
+  if(!j.is_admin){ showMsg("Acces refuse : compte non administrateur.",true); return false; }
+  return true;
+}
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+async function loadPending(){
+  const r=await fetch("/api/admin/pending",{headers:authHeaders()});
+  const j=await readJson(r);
+  if(!r.ok){ document.getElementById("pending_wrap").innerHTML="<p class=sub>"+esc(j.error)+"</p>"; return; }
+  const rows=j.pending||[];
+  if(!rows.length){ document.getElementById("pending_wrap").innerHTML="<p class=sub>Aucune demande.</p>"; return; }
+  let html="<table><tr><th>ID</th><th>MAC</th><th>Nom</th><th>Email</th><th>Date</th><th></th></tr>";
+  for(const p of rows){
+    html+="<tr><td>"+p.id+"</td><td><code>"+esc(p.mac)+"</code></td><td>"+esc(p.first_name)+" "+esc(p.last_name)+"</td><td>"+esc(p.email)+"</td><td>"+esc(p.created_at)+"</td><td>";
+    html+="<button data-approve='"+p.id+"'>Valider</button> <button class=danger data-reject='"+p.id+"'>Refuser</button></td></tr>";
+  }
+  html+="</table>";
+  document.getElementById("pending_wrap").innerHTML=html;
+  document.querySelectorAll("[data-approve]").forEach(btn=>{
+    btn.onclick=async()=>{
+      const id=btn.getAttribute("data-approve");
+      const r=await fetch("/api/admin/pending/"+id+"/approve",{method:"POST",headers:authHeaders()});
+      const j=await readJson(r);
+      if(r.ok){ showMsg("Approuve : device_id="+j.device_id,false); loadAll(); }
+      else showMsg(j.error||"Echec",true);
+    };
+  });
+  document.querySelectorAll("[data-reject]").forEach(btn=>{
+    btn.onclick=async()=>{
+      const id=btn.getAttribute("data-reject");
+      const r=await fetch("/api/admin/pending/"+id+"/reject",{method:"POST",headers:authHeaders(),body:JSON.stringify({notes:"refuse admin"})});
+      if(r.ok){ showMsg("Demande refusee.",false); loadPending(); }
+    };
+  });
+}
+async function loadHello(){
+  const r=await fetch("/api/admin/provisioning_hellos",{headers:authHeaders()});
+  if(!r.ok){ document.getElementById("hello_wrap").innerHTML="<p class=sub>—</p>"; return; }
+  const j=await readJson(r);
+  const rows=j.hellos||[];
+  if(!rows.length){ document.getElementById("hello_wrap").innerHTML="<p class=sub>Aucun hello recent.</p>"; return; }
+  let html="<table><tr><th>MAC</th><th>Vu</th><th>IP</th></tr>";
+  for(const h of rows){
+    html+="<tr><td><code>"+esc(h.mac)+"</code></td><td>"+esc(h.at_iso||h.at)+"</td><td>"+esc(h.ip||"")+"</td></tr>";
+  }
+  html+="</table>";
+  document.getElementById("hello_wrap").innerHTML=html;
+}
+async function loadDevices(){
+  const r=await fetch("/api/admin/devices",{headers:authHeaders()});
+  const j=await readJson(r);
+  if(!r.ok){ document.getElementById("devices_wrap").innerHTML="<p class=sub>"+esc(j.error)+"</p>"; return; }
+  const rows=j.devices||[];
+  if(!rows.length){ document.getElementById("devices_wrap").innerHTML="<p class=sub>Aucune station.</p>"; return; }
+  let html="<table><tr><th>device_id</th><th>MAC</th><th>Statut</th><th>Proprietaire</th><th>WiFi live</th><th>IP</th></tr>";
+  for(const d of rows){
+    html+="<tr><td><code>"+esc(d.device_id)+"</code></td><td><code>"+esc(d.mac)+"</code></td><td>"+esc(d.status)+"</td><td>"+esc(d.current_owner_id||"—")+"</td><td>"+(d.wifi_connected?"oui":"non")+"</td><td>"+esc(d.last_ip||"")+"</td></tr>";
+  }
+  html+="</table>";
+  document.getElementById("devices_wrap").innerHTML=html;
+}
+async function loadAll(){ await Promise.all([loadPending(),loadHello(),loadDevices()]); }
+(async()=>{
+  if(await ensureAdmin()) loadAll();
+  setInterval(loadAll,15000);
+})();
+</script>
+</body>
+</html>

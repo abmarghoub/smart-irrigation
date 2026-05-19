@@ -6,6 +6,22 @@
 #define WIFI_SSID "TON_WIFI"
 #define WIFI_PASSWORD "TON_MOT_DE_PASSE_WIFI"
 
+/** 1 = portail AP Irrigation-Setup (WiFi + inscription) ; 0 = WIFI_SSID dans ce fichier seulement */
+#ifndef ENABLE_WIFI_PROVISIONING
+#define ENABLE_WIFI_PROVISIONING 0
+#endif
+#ifndef WIFI_CONFIG_AP_NAME
+#define WIFI_CONFIG_AP_NAME "Irrigation-Setup"
+#endif
+/** URL complete du pont Render (inscription depuis l'ESP) */
+#ifndef BRIDGE_REGISTER_URL
+#define BRIDGE_REGISTER_URL "https://VOTRE-APP.onrender.com/api/register-device"
+#endif
+/** Si NVS vide : ID par defaut (laisser station01 ou vide pour provisioning pur) */
+#ifndef DEVICE_ID_FALLBACK
+#define DEVICE_ID_FALLBACK "station01"
+#endif
+
 #define WEATHER_HAS_FIXED_GEO 0
 #define WEATHER_FIXED_LAT 0.0f
 #define WEATHER_FIXED_LON 0.0f

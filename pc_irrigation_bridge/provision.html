@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Inscription station</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#0f1419;color:#e7ecf3;padding:1rem;max-width:420px;margin:auto}
+input,button{width:100%;padding:.55rem;margin:.35rem 0;border-radius:8px;border:1px solid #2a3544;background:#1a2332;color:#e7ecf3}
+button{background:#3d9cf9;border:none;font-weight:600;cursor:pointer}
+label{font-size:.85rem;color:#8b9cb3}
+#msg{min-height:1.2em;font-size:.9rem}
+a{color:#3d9cf9}
+</style>
+</head>
+<body>
+<h1>Inscription (4G / WiFi)</h1>
+<p class="sub">Si le portail sur la carte est indisponible, inscrivez-vous ici avec la <strong>MAC</strong> affichee sur le moniteur serie ou l'etiquette.</p>
+<form id="reg">
+<label>MAC (AA:BB:CC:DD:EE:FF)</label>
+<input id="mac" required pattern="([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}"/>
+<label>Prenom</label><input id="first_name" required/>
+<label>Nom</label><input id="last_name" required/>
+<label>Email</label><input id="email" type="email" required/>
+<label>Mot de passe compte (6+)</label><input id="password" type="password" minlength="6" required/>
+<button type="submit">Envoyer la demande</button>
+</form>
+<p id="msg"></p>
+<p><a href="/login">Connexion</a> · <a href="/">Dashboard</a></p>
+<script>
+document.getElementById("reg").onsubmit=async(e)=>{
+  e.preventDefault();
+  const msg=document.getElementById("msg");
+  msg.textContent="Envoi…";
+  const body={
+    mac:document.getElementById("mac").value.trim(),
+    first_name:document.getElementById("first_name").value.trim(),
+    last_name:document.getElementById("last_name").value.trim(),
+    email:document.getElementById("email").value.trim(),
+    password:document.getElementById("password").value
+  };
+  try{
+    const r=await fetch("/api/register-device",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const j=await r.json();
+    if(r.ok){ msg.textContent="Demande enregistree. Un administrateur validera votre station."; }
+    else msg.textContent=j.error||"Echec";
+  }catch(err){ msg.textContent=String(err); }
+};
+</script>
+</body>
+</html>

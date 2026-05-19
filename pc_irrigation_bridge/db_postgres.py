@@ -158,7 +158,8 @@ class PostgresStore:
                 cur.execute(ddl)
             conn.commit()
 
-    def insert(self, row: TelemetryData) -> None:
+    def insert(self, row: TelemetryData, device_id: str | None = None) -> None:
+        did = (device_id or self._device_id)[:64]
         sql = f"""
         INSERT INTO {self._table} (
           device_id, crop_name, soil_type, crop_age_days, temperature_c, humidity_pct, rainfall_mm,
@@ -168,7 +169,7 @@ class PostgresStore:
         )
         """
         vals = (
-            self._device_id,
+            did,
             row.crop_name,
             row.soil_type,
             row.crop_age_days,
@@ -221,10 +222,13 @@ class PostgresStore:
         self,
         csv_header: list[str],
         *,
+        device_id: str | None = None,
+        recorded_after: datetime | None = None,
         crop_name: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
     ) -> list[list[Any]]:
+        did = (device_id or self._device_id)[:64]
         sql = f"""
         SELECT recorded_at, crop_name, soil_type, crop_age_days, temperature_c, humidity_pct, rainfall_mm,
                wind_speed_m_s, soil_moisture_pct, p_fraction, irrigate, irrigation_litres
@@ -232,7 +236,10 @@ class PostgresStore:
         WHERE device_id = %s
         {self._sql_complete_rows_only()}
         """
-        params: list[Any] = [self._device_id]
+        params: list[Any] = [did]
+        if recorded_after is not None:
+            sql += " AND recorded_at >= %s"
+            params.append(recorded_after)
         if crop_name:
             sql += " AND crop_name = %s"
             params.append(crop_name)

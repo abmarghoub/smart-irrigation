@@ -13,7 +13,15 @@
 | `MQTT_PASSWORD` | *(mot de passe HiveMQ — **identique** à `weather_secrets.h`, caractère `#` tel quel, pas `%23`)* |
 | `MQTT_TOPIC_TELEMETRY` | `irrigation/station01/telemetry` |
 | `MQTT_TOPIC_COMMAND` | `irrigation/station01/command/manual` |
-| `DEVICE_ID` | `station01` |
+| `DEVICE_ID` | `station01` (defaut si une seule station legacy) |
+| `SUPABASE_URL` | URL Supabase (auth multi-utilisateurs) |
+| `SUPABASE_ANON_KEY` | Cle anon |
+| `SUPABASE_JWT_SECRET` | Verification JWT (ou laisser vide + fallback API user) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Inscription stations |
+| `ADMIN_EMAILS` | `vous@email.com` (acces `/admin`) |
+| `DEVICE_IDS` | Optionnel : `station01,station02` |
+
+Voir aussi **`MULTI_STATIONS.md`** (provisioning, admin, transfert).
 
 Mot de passe Supabase avec `#` → encoder en `%23` dans l'URI.
 
