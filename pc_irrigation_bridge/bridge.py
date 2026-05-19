@@ -119,21 +119,6 @@ def _bridge_mqtt_connected() -> bool:
         return False
 
 
-def _offline_diagnostic_hint(*, age_s: int | None, bridge_mqtt: bool) -> str:
-    if not bridge_mqtt:
-        return (
-            "Le pont Render n'est pas connecte a HiveMQ — redeployez le service ou verifiez "
-            "MQTT_HOST / MQTT_USER / MQTT_PASSWORD sur Render."
-        )
-    if age_s is not None and age_s > _telemetry_stale_seconds():
-        return (
-            "L'ESP tourne peut-etre en local mais n'envoie pas sur HiveMQ. Moniteur serie : "
-            "cherchez [MQTT] Connecte a HiveMQ puis [MQTT] OK publie (ou M pour test). "
-            "Sinon : WiFi, MQTT_PASSWORD dans weather_secrets.h, PUBLISH sur irrigation/station01/telemetry."
-        )
-    return "En attente de la premiere telemetrie MQTT depuis l'ESP32."
-
-
 def _offline_state_payload(
     *,
     note: str,
@@ -148,7 +133,6 @@ def _offline_state_payload(
         "telemetry_age_s": age_s,
         "telemetry_stale_seconds": stale_s,
         "bridge_mqtt": bmqtt,
-        "diagnostic_hint": _offline_diagnostic_hint(age_s=age_s, bridge_mqtt=bmqtt),
         "wifi_connected": False,
         "ip": "",
         "uptime_s": 0,
@@ -308,7 +292,7 @@ def _is_telemetry_topic(topic: str) -> bool:
 def _mqtt_subscribe_all(client: mqtt.Client, ns: argparse.Namespace) -> None:
     """Topics exacts seulement (HiveMQ refuse souvent les wildcards + et #)."""
     topics: list[tuple[str, int]] = [
-        (ns.topic_telemetry, 0),
+        (ns.topic_telemetry, 1),
     ]
     legacy = _env("MQTT_TOPIC_COMMAND_LEGACY", "irrigation/command/manual")
     if legacy and legacy not in (ns.topic_command,):
@@ -395,18 +379,25 @@ def _mqtt_configured() -> bool:
 
 
 def _run_mqtt_maintenance_if_needed(ns: argparse.Namespace, mqtt_ok: bool) -> None:
-    """Loopback / redemarrage MQTT hors requete HTTP (evite timeout Render sur /api/health)."""
+    """Reconnexion / re-abonnement si plus de telemetrie (boucle MQTT morte cote Render)."""
     global _mqtt_maint_running
-    if not mqtt_ok or _mqtt_client is None or _last_mqtt_rx_at != 0:
+    if not mqtt_ok or _mqtt_client is None:
         return
     now = int(time.time())
-    need_resub = now - _last_mqtt_resubscribe_at >= 45
-    need_loopback = _last_mqtt_loopback_try_at == 0 or now - _last_mqtt_loopback_try_at >= 90
-    need_restart = (
-        not (_last_mqtt_loopback_at > 0)
-        and (now - _last_mqtt_restart_at >= 120 or _last_mqtt_restart_at == 0)
+    age = _telemetry_age_seconds()
+    stale = age is not None and age > _telemetry_stale_seconds()
+    never_rx = _last_mqtt_rx_at == 0
+
+    # Bug corrige : avant, maintenance uniquement si _last_mqtt_rx_at==0 (1 seul message puis silence).
+    need_restart_stale = stale and (now - _last_mqtt_restart_at >= 30)
+    need_resub = never_rx and (now - _last_mqtt_resubscribe_at >= 45)
+    need_loopback = never_rx and (
+        _last_mqtt_loopback_try_at == 0 or now - _last_mqtt_loopback_try_at >= 90
     )
-    if not (need_resub or need_loopback or need_restart):
+    need_restart_cold = never_rx and not (_last_mqtt_loopback_at > 0) and (
+        now - _last_mqtt_restart_at >= 120 or _last_mqtt_restart_at == 0
+    )
+    if not (need_restart_stale or need_resub or need_loopback or need_restart_cold):
         return
 
     with _mqtt_maint_lock:
@@ -417,22 +408,24 @@ def _run_mqtt_maintenance_if_needed(ns: argparse.Namespace, mqtt_ok: bool) -> No
     def _work() -> None:
         global _mqtt_maint_running, _last_mqtt_resubscribe_at, _last_mqtt_loopback_try_at
         try:
+            if need_restart_stale:
+                print(f"[MQTT] telemetrie perimee ({age}s) — redemarrage client...")
+                _mqtt_restart(ns)
+                return
             client = _mqtt_client
             if client is None:
                 return
             n = int(time.time())
-            if n - _last_mqtt_resubscribe_at >= 45:
+            if need_resub:
                 _last_mqtt_resubscribe_at = n
                 try:
                     _mqtt_subscribe_all(client, ns)
                     print("[MQTT] re-abonnement telemetry (arriere-plan)")
                 except Exception as e:
                     print("[MQTT] re-abonnement echoue:", e)
-            if _last_mqtt_loopback_try_at == 0 or n - _last_mqtt_loopback_try_at >= 90:
+            if need_loopback:
                 _mqtt_try_loopback()
-            if not (_last_mqtt_loopback_at > 0) and (
-                n - _last_mqtt_restart_at >= 120 or _last_mqtt_restart_at == 0
-            ):
+            if need_restart_cold:
                 _mqtt_restart(ns)
                 if _last_mqtt_loopback_try_at == 0 or n - _last_mqtt_loopback_try_at >= 90:
                     _mqtt_try_loopback()
@@ -471,22 +464,15 @@ def _mqtt_stop() -> None:
     global _mqtt_client, _mqtt_thread
     if _mqtt_client is not None:
         try:
-            _mqtt_client.disconnect()
+            _mqtt_client.loop_stop()
         except Exception:
             pass
         try:
-            _mqtt_client.loop_stop()
+            _mqtt_client.disconnect()
         except Exception:
             pass
         _mqtt_client = None
     _mqtt_thread = None
-
-
-def _mqtt_loop_forever(client: mqtt.Client) -> None:
-    try:
-        client.loop_forever(retry_first_connection=True)
-    except Exception as e:
-        print("[MQTT] loop_forever termine:", e)
 
 
 def _mqtt_restart(ns: argparse.Namespace) -> mqtt.Client | None:
@@ -587,19 +573,19 @@ def _start_mqtt(ns: argparse.Namespace) -> mqtt.Client | None:
     if ns.mqtt_tls:
         client.tls_set(cert_reqs=ssl.CERT_REQUIRED, tls_version=ssl.PROTOCOL_TLS_CLIENT)
     try:
-        client.connect(ns.mqtt_host, ns.mqtt_port, keepalive=60)
+        client.connect(ns.mqtt_host, ns.mqtt_port, keepalive=30)
     except Exception as e:
         msg = f"MQTT connect exception: {e}"
         print(f"[bridge] {msg}")
         _bootstrap_notes.append(msg)
         return None
-    _mqtt_thread = threading.Thread(
-        target=_mqtt_loop_forever,
-        args=(client,),
-        daemon=True,
-        name="mqtt-loop",
-    )
-    _mqtt_thread.start()
+    try:
+        client.loop_start()
+    except Exception as e:
+        msg = f"MQTT loop_start: {e}"
+        print(f"[bridge] {msg}")
+        _bootstrap_notes.append(msg)
+        return None
     if not _wait_mqtt_connected(client):
         msg = f"MQTT timeout vers {ns.mqtt_host}:{ns.mqtt_port} (verifier MQTT_USER/PASSWORD)"
         print(f"[bridge] {msg}")
@@ -754,9 +740,12 @@ def index() -> Response:
 def api_state() -> Any:
     stale_s = _telemetry_stale_seconds()
     ns = _args_ns
+    bridge_mqtt = _bridge_mqtt_connected()
     if ns is not None:
         _schedule_mqtt_reconnect_if_needed(ns)
-    bridge_mqtt = _bridge_mqtt_connected()
+        bridge_mqtt = _bridge_mqtt_connected()
+        if bridge_mqtt:
+            _run_mqtt_maintenance_if_needed(ns, bridge_mqtt)
     with _state_lock:
         if not _last_state:
             return jsonify(
@@ -768,10 +757,7 @@ def api_state() -> Any:
             age = _telemetry_age_seconds()
             return jsonify(
                 _offline_state_payload(
-                    note=(
-                        f"ESP hors ligne — derniere telemetrie il y a {age}s "
-                        f"(seuil {stale_s}s). Verifiez MQTT sur l'ESP (moniteur serie)."
-                    ),
+                    note=f"ESP hors ligne — derniere telemetrie il y a {age}s.",
                     age_s=age,
                     bridge_mqtt=bridge_mqtt,
                 )
@@ -829,8 +815,8 @@ def api_health() -> Any:
         rx_hint = f"Derniere telemetrie il y a {age}s."
         if age > _telemetry_stale_seconds():
             rx_hint = (
-                f"ESP hors ligne — derniere telemetrie il y a {age}s "
-                f"(seuil {_telemetry_stale_seconds()}s)."
+                f"Telemetrie perimee ({age}s) — reconnexion du pont en cours. "
+                f"Si l'ESP affiche [MQTT] OK publie, attendez 30 s puis rafraichissez."
             )
 
     tel_age = _telemetry_age_seconds()
@@ -864,10 +850,6 @@ def api_health() -> Any:
             "mqtt_rx_count": _mqtt_rx_count,
             "mqtt_rx_hint": rx_hint,
             "last_manual_publish": _last_manual_publish,
-            "diagnostic_hint": _offline_diagnostic_hint(
-                age_s=tel_age,
-                bridge_mqtt=mqtt_ok,
-            ),
             "notes": _bootstrap_notes[-5:],
         }
     )

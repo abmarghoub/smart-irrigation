@@ -258,17 +258,10 @@ async function poll(){
     if(!online){
       const age=typeof j.telemetry_age_s==="number"?j.telemetry_age_s:
         (typeof h.telemetry_age_s==="number"?h.telemetry_age_s:null);
-      const hint=j.diagnostic_hint||h.diagnostic_hint||"";
-      const bridgeMqtt=(j.bridge_mqtt===true||h.mqtt===true);
-      let msg=j.note||(age!=null?
+      errEl.textContent=age!=null?
         "ESP hors ligne — derniere telemetrie il y a "+age+" s.":
-        (h.mqtt_rx_hint||"Station hors ligne."));
-      if(hint) msg+="\n"+hint;
-      errEl.style.whiteSpace="pre-line";
-      errEl.textContent=msg;
-      const bridgeTxt=bridgeMqtt?"Render ↔ HiveMQ : connecte":"Render ↔ HiveMQ : deconnecte (reconnexion…)";
-      document.getElementById("cloud_mqtt").textContent=bridgeTxt;
-      document.getElementById("ip").innerHTML="IP (ESP32) : <strong>—</strong> <span style=color:#ff6b6b>(pas de telemetrie cloud)</span>";
+        "ESP hors ligne.";
+      document.getElementById("ip").innerHTML="IP (ESP32) : <strong>—</strong> <span style=color:#ff6b6b>(hors ligne)</span>";
       document.getElementById("lastupd").textContent="Derniere mise a jour : "+new Date().toLocaleTimeString();
       renderOfflinePanels();
       return;
