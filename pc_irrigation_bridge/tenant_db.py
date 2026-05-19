@@ -510,6 +510,205 @@ class TenantStore:
                     out.append(telemetry_to_export_csv_row(recorded_iso, t, csv_header))
         return out
 
+    def admin_stats(self, telemetry_table: str = "irrigation_telemetry") -> dict[str, Any]:
+        t = telemetry_table if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", telemetry_table) else "irrigation_telemetry"
+        with _connect(self._url) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM app_users")
+                users_total = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM devices")
+                devices_total = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM devices WHERE status = 'active'")
+                devices_active = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM devices WHERE status = 'unclaimed'")
+                devices_unclaimed = cur.fetchone()[0]
+                cur.execute(
+                    "SELECT COUNT(*) FROM pending_registrations WHERE status = 'pending'"
+                )
+                pending_count = cur.fetchone()[0]
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM app_users u
+                    WHERE NOT EXISTS (
+                      SELECT 1 FROM user_stations us
+                      WHERE us.user_id = u.id AND us.active = TRUE
+                    )
+                    """
+                )
+                users_no_station = cur.fetchone()[0]
+                try:
+                    cur.execute(
+                        f"""
+                        SELECT COUNT(*) FROM {t}
+                        WHERE recorded_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
+                        """
+                    )
+                    telemetry_today = cur.fetchone()[0]
+                except Exception:
+                    telemetry_today = 0
+        return {
+            "users_total": users_total,
+            "devices_total": devices_total,
+            "devices_active": devices_active,
+            "devices_unclaimed": devices_unclaimed,
+            "pending_count": pending_count,
+            "users_without_station": users_no_station,
+            "telemetry_rows_today": telemetry_today,
+        }
+
+    def list_users_detailed(self) -> list[dict[str, Any]]:
+        import os
+
+        admin_emails = {
+            e.strip().lower()
+            for e in (os.environ.get("ADMIN_EMAILS", "") or "").split(",")
+            if e.strip()
+        }
+        with _connect(self._url) as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT u.id, u.email, u.first_name, u.last_name, u.is_admin, u.created_at,
+                      COALESCE(array_agg(us.device_id) FILTER (
+                        WHERE us.active = TRUE AND us.device_id IS NOT NULL
+                      ), '{}') AS device_ids
+                    FROM app_users u
+                    LEFT JOIN user_stations us ON us.user_id = u.id
+                    GROUP BY u.id, u.email, u.first_name, u.last_name, u.is_admin, u.created_at
+                    ORDER BY u.created_at DESC
+                    """
+                )
+                rows = []
+                for r in cur.fetchall():
+                    d = dict(r)
+                    dids = d.get("device_ids") or []
+                    if isinstance(dids, str):
+                        dids = []
+                    d["device_ids"] = [x for x in dids if x]
+                    em = (d.get("email") or "").lower()
+                    d["is_admin"] = bool(d.get("is_admin")) or em in admin_emails
+                    if d.get("created_at") and hasattr(d["created_at"], "isoformat"):
+                        d["created_at"] = d["created_at"].isoformat()
+                    rows.append(d)
+                return rows
+
+    def update_app_user_profile(
+        self,
+        user_id: str,
+        *,
+        first_name: str | None = None,
+        last_name: str | None = None,
+    ) -> None:
+        with _connect(self._url) as conn:
+            with conn.cursor() as cur:
+                if first_name is not None:
+                    cur.execute(
+                        "UPDATE app_users SET first_name = %s WHERE id = %s::uuid",
+                        (first_name, user_id),
+                    )
+                if last_name is not None:
+                    cur.execute(
+                        "UPDATE app_users SET last_name = %s WHERE id = %s::uuid",
+                        (last_name, user_id),
+                    )
+            conn.commit()
+
+    def deactivate_user_stations(self, user_id: str) -> None:
+        with _connect(self._url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE user_stations SET active = FALSE WHERE user_id = %s::uuid",
+                    (user_id,),
+                )
+            conn.commit()
+
+    def assign_device_to_user(self, device_id: str, user_id: str) -> None:
+        dev = self.get_device(device_id)
+        if not dev:
+            raise ValueError("Station inconnue.")
+        with _connect(self._url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE devices
+                    SET status = 'active', current_owner_id = %s::uuid,
+                        unclaimed_at = NULL, updated_at = NOW()
+                    WHERE device_id = %s
+                    """,
+                    (user_id, device_id),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO user_stations (user_id, device_id, active)
+                    VALUES (%s::uuid, %s, TRUE)
+                    ON CONFLICT (user_id, device_id) DO UPDATE SET active = TRUE
+                    """,
+                    (user_id, device_id),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO device_ownership_history (device_id, mac, user_id, reason)
+                    VALUES (%s, %s, %s::uuid, 'admin_assign')
+                    """,
+                    (device_id, dev["mac"], user_id),
+                )
+            conn.commit()
+
+    def admin_force_unclaimed(self, device_id: str) -> None:
+        dev = self.get_device(device_id)
+        if not dev:
+            raise ValueError("Station inconnue.")
+        with _connect(self._url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE user_stations SET active = FALSE WHERE device_id = %s
+                    """,
+                    (device_id,),
+                )
+                cur.execute(
+                    """
+                    UPDATE devices
+                    SET status = 'unclaimed', current_owner_id = NULL,
+                        unclaimed_at = NOW(), updated_at = NOW()
+                    WHERE device_id = %s
+                    """,
+                    (device_id,),
+                )
+            conn.commit()
+
+    def list_devices_filtered(self, status: str | None = None) -> list[dict[str, Any]]:
+        sql = """
+        SELECT d.*, u.email AS owner_email
+        FROM devices d
+        LEFT JOIN app_users u ON u.id = d.current_owner_id
+        """
+        params: list[Any] = []
+        if status and status != "all":
+            sql += " WHERE d.status = %s"
+            params.append(status)
+        sql += " ORDER BY d.updated_at DESC"
+        with _connect(self._url) as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql, tuple(params))
+                out = []
+                for r in cur.fetchall():
+                    d = dict(r)
+                    for k in ("first_registered_at", "unclaimed_at", "updated_at"):
+                        if d.get(k) and hasattr(d[k], "isoformat"):
+                            d[k] = d[k].isoformat()
+                    if d.get("current_owner_id"):
+                        d["current_owner_id"] = str(d["current_owner_id"])
+                    out.append(d)
+                return out
+
+    def get_user_by_id(self, user_id: str) -> dict[str, Any] | None:
+        with _connect(self._url) as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("SELECT * FROM app_users WHERE id = %s::uuid", (user_id,))
+                row = cur.fetchone()
+                return dict(row) if row else None
+
 
 def tenant_store_from_env() -> TenantStore | None:
     import os

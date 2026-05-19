@@ -27,27 +27,20 @@ def supabase_url() -> str:
     return _env("SUPABASE_URL").rstrip("/")
 
 
-def verify_access_token(token: str) -> dict[str, Any] | None:
-    """Retourne {id, email, ...} ou None."""
-    if not token:
-        return None
-    secret = _env("SUPABASE_JWT_SECRET")
-    if secret:
-        try:
-            payload = jwt.decode(
-                token,
-                secret,
-                algorithms=["HS256"],
-                audience="authenticated",
-                options={"verify_aud": True},
-            )
-            sub = payload.get("sub")
-            email = payload.get("email") or ""
-            if sub:
-                return {"id": sub, "email": email, "role": payload.get("role", "")}
-        except jwt.PyJWTError:
-            return None
-    # Fallback : API Supabase /auth/v1/user
+def admin_emails_set() -> set[str]:
+    return {
+        e.strip().lower()
+        for e in (_env("ADMIN_EMAILS", "") or "").split(",")
+        if e.strip()
+    }
+
+
+def is_admin_email(email: str) -> bool:
+    return email.lower().strip() in admin_emails_set()
+
+
+def _verify_via_supabase_api(token: str) -> dict[str, Any] | None:
+    """Fallback : API Supabase /auth/v1/user"""
     url = supabase_url()
     anon = _env("SUPABASE_ANON_KEY")
     if not url or not anon:
@@ -72,6 +65,53 @@ def verify_access_token(token: str) -> dict[str, Any] | None:
     except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError, TimeoutError):
         return None
     return None
+
+
+def verify_access_token(token: str) -> dict[str, Any] | None:
+    """Retourne {id, email, ...} ou None."""
+    if not token:
+        return None
+    secret = _env("SUPABASE_JWT_SECRET")
+    if secret:
+        try:
+            payload = jwt.decode(
+                token,
+                secret,
+                algorithms=["HS256"],
+                audience="authenticated",
+                options={"verify_aud": True},
+            )
+            sub = payload.get("sub")
+            email = payload.get("email") or ""
+            if sub:
+                return {"id": sub, "email": email, "role": payload.get("role", "")}
+        except jwt.PyJWTError:
+            print("[auth] JWT local fail, fallback API Supabase")
+    return _verify_via_supabase_api(token)
+
+
+def delete_supabase_user(user_id: str) -> None:
+    url = supabase_url()
+    service = _env("SUPABASE_SERVICE_ROLE_KEY")
+    if not url or not service:
+        raise RuntimeError("SUPABASE_SERVICE_ROLE_KEY requis")
+    req = urllib.request.Request(
+        f"{url}/auth/v1/admin/users/{user_id}",
+        headers={
+            "Authorization": f"Bearer {service}",
+            "apikey": service,
+        },
+        method="DELETE",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            if resp.status not in (200, 204):
+                raise RuntimeError(f"Supabase delete status {resp.status}")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return
+        err_body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(err_body) from e
 
 
 def register_supabase_user(email: str, password: str) -> dict[str, Any]:

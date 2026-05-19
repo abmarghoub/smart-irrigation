@@ -14,7 +14,13 @@ from typing import Any, Callable
 
 from flask import Flask, Response, jsonify, request
 
-from auth_supabase import auth_enabled, register_supabase_user, verify_access_token
+from auth_supabase import (
+    auth_enabled,
+    delete_supabase_user,
+    is_admin_email,
+    register_supabase_user,
+    verify_access_token,
+)
 from db_mysql import VALID_CROP_NAMES, is_row_complete_for_db, extract_telemetry_from_mqtt
 from tenant_db import TenantStore, normalize_mac, mac_compact, tenant_store_from_env
 
@@ -106,11 +112,13 @@ def require_auth(admin: bool = False) -> Callable:
             if not user:
                 return jsonify({"error": "Authentification requise"}), 401
             tenant = tenant_store_from_env()
-            is_admin = False
+            is_admin = is_admin_email(user.get("email", ""))
             if tenant:
                 try:
                     tenant.upsert_app_user(user["id"], user.get("email", ""))
-                    is_admin = tenant.is_admin_user(user["id"], user.get("email", ""))
+                    is_admin = is_admin or tenant.is_admin_user(
+                        user["id"], user.get("email", "")
+                    )
                 except Exception:
                     pass
             if admin and not is_admin:
@@ -160,15 +168,26 @@ def register_multi_routes(
     parse_export_date: Callable[[str | None], date | None],
     csv_export_filename: Callable,
     csv_response_from_rows: Callable,
+    get_health_snapshot: Callable[[], dict[str, Any]] | None = None,
 ) -> None:
+    def _health() -> dict[str, Any]:
+        if get_health_snapshot:
+            return get_health_snapshot()
+        return {}
     @app.route("/login")
     def login_page() -> Response:
         path = os.path.join(os.path.dirname(__file__), "login.html")
         return Response(open(path, encoding="utf-8").read(), mimetype="text/html; charset=utf-8")
 
     @app.route("/admin")
-    def admin_page() -> Response:
+    @app.route("/admin/<path:subpath>")
+    def admin_page(subpath: str = "") -> Response:
         path = os.path.join(os.path.dirname(__file__), "admin_dashboard.html")
+        return Response(open(path, encoding="utf-8").read(), mimetype="text/html; charset=utf-8")
+
+    @app.route("/view")
+    def view_client_page() -> Response:
+        path = os.path.join(os.path.dirname(__file__), "dashboard.html")
         return Response(open(path, encoding="utf-8").read(), mimetype="text/html; charset=utf-8")
 
     @app.route("/provision")
@@ -264,20 +283,193 @@ def register_multi_routes(
             return jsonify({"error": "DB indisponible"}), 503
         return jsonify({"pending": tenant.list_pending()})
 
+    @app.route("/api/admin/stats", methods=["GET"])
+    @require_auth(admin=True)
+    def api_admin_stats() -> Any:
+        tenant = tenant_store_from_env()
+        if not tenant:
+            return jsonify({"error": "DB indisponible"}), 503
+        import os
+
+        table = os.environ.get("PG_TABLE", "irrigation_telemetry").strip() or "irrigation_telemetry"
+        stats = tenant.admin_stats(table)
+        h = _health()
+        stats["mqtt_connected"] = h.get("mqtt", False)
+        stats["last_mqtt_rx_at"] = h.get("last_mqtt_rx_at", 0)
+        stats["mqtt_rx_count"] = h.get("mqtt_rx_count", 0)
+        pending = tenant.list_pending()[:5]
+        for p in pending:
+            if p.get("created_at") and hasattr(p["created_at"], "isoformat"):
+                p["created_at"] = p["created_at"].isoformat()
+        stats["recent_pending"] = pending
+        hellos = []
+        for mac, info in sorted(_provisioning_hellos.items(), key=lambda x: -x[1].get("at", 0))[:5]:
+            hellos.append(info)
+        stats["recent_hellos"] = hellos
+        return jsonify(stats)
+
+    @app.route("/api/admin/users", methods=["GET"])
+    @require_auth(admin=True)
+    def api_admin_users_list() -> Any:
+        tenant = tenant_store_from_env()
+        if not tenant:
+            return jsonify({"error": "DB indisponible"}), 503
+        return jsonify({"users": tenant.list_users_detailed()})
+
+    @app.route("/api/admin/users", methods=["POST"])
+    @require_auth(admin=True)
+    def api_admin_users_create() -> Any:
+        data = request.get_json(silent=True) or {}
+        email = str(data.get("email", "")).strip().lower()
+        password = str(data.get("password", ""))
+        first_name = str(data.get("first_name", "")).strip()
+        last_name = str(data.get("last_name", "")).strip()
+        device_id = str(data.get("device_id", "")).strip()
+        if not email or len(password) < 6:
+            return jsonify({"error": "email et mot de passe (6+) requis"}), 400
+        tenant = tenant_store_from_env()
+        if not tenant:
+            return jsonify({"error": "DB indisponible"}), 503
+        try:
+            sb = register_supabase_user(email, password)
+            uid = sb.get("id")
+            if not uid:
+                return jsonify({"error": sb.get("error", "creation echouee")}), 400
+            tenant.upsert_app_user(uid, email, first_name=first_name, last_name=last_name)
+            if device_id:
+                tenant.assign_device_to_user(device_id, uid)
+            return jsonify({"ok": True, "id": uid, "email": email})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/admin/users/<user_id>", methods=["PATCH"])
+    @require_auth(admin=True)
+    def api_admin_users_patch(user_id: str) -> Any:
+        data = request.get_json(silent=True) or {}
+        tenant = tenant_store_from_env()
+        if not tenant:
+            return jsonify({"error": "DB indisponible"}), 503
+        tenant.update_app_user_profile(
+            user_id,
+            first_name=data.get("first_name"),
+            last_name=data.get("last_name"),
+        )
+        device_ids = data.get("device_ids")
+        if isinstance(device_ids, list):
+            for did in device_ids:
+                if did:
+                    try:
+                        tenant.assign_device_to_user(str(did), user_id)
+                    except ValueError:
+                        pass
+        return jsonify({"ok": True})
+
+    @app.route("/api/admin/users/<user_id>", methods=["DELETE"])
+    @require_auth(admin=True)
+    def api_admin_users_delete(user_id: str) -> Any:
+        tenant = tenant_store_from_env()
+        if not tenant:
+            return jsonify({"error": "DB indisponible"}), 503
+        try:
+            tenant.deactivate_user_stations(user_id)
+            try:
+                delete_supabase_user(user_id)
+            except Exception as e:
+                print("[admin] delete supabase user:", e)
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     @app.route("/api/admin/devices", methods=["GET"])
     @require_auth(admin=True)
     def api_admin_devices() -> Any:
         tenant = tenant_store_from_env()
         if not tenant:
             return jsonify({"error": "DB indisponible"}), 503
+        status = request.args.get("status", "all").strip() or "all"
         states = get_states()
-        devices = tenant.list_devices()
+        hellos: list[dict[str, Any]] = []
+        if status == "hello":
+            devices = []
+            pending = []
+            for mac, info in sorted(
+                _provisioning_hellos.items(), key=lambda x: -x[1].get("at", 0)
+            ):
+                hellos.append(
+                    {
+                        "mac": mac,
+                        "ip": info.get("ip", ""),
+                        "at": info.get("at", 0),
+                    }
+                )
+        elif status == "pending":
+            devices = []
+            pending = tenant.list_pending()
+        else:
+            devices = tenant.list_devices_filtered(None if status == "all" else status)
+            pending = tenant.list_pending() if status in ("all", "pending") else []
         for d in devices:
             did = d.get("device_id")
             st = states.get(did, {}) if did else {}
             d["last_ip"] = st.get("ip", "")
             d["wifi_connected"] = st.get("wifi_connected", False)
-        return jsonify({"devices": devices})
+        for p in pending:
+            if p.get("created_at") and hasattr(p["created_at"], "isoformat"):
+                p["created_at"] = p["created_at"].isoformat()
+        return jsonify({"devices": devices, "pending": pending, "hellos": hellos})
+
+    @app.route("/api/admin/devices/<device_id>/assign", methods=["POST"])
+    @require_auth(admin=True)
+    def api_admin_device_assign(device_id: str) -> Any:
+        data = request.get_json(silent=True) or {}
+        user_id = str(data.get("user_id", "")).strip()
+        if not user_id:
+            return jsonify({"error": "user_id requis"}), 400
+        tenant = tenant_store_from_env()
+        if not tenant:
+            return jsonify({"error": "DB indisponible"}), 503
+        try:
+            tenant.assign_device_to_user(device_id, user_id)
+            return jsonify({"ok": True})
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @app.route("/api/admin/devices/<device_id>/unclaim", methods=["POST"])
+    @require_auth(admin=True)
+    def api_admin_device_unclaim(device_id: str) -> Any:
+        tenant = tenant_store_from_env()
+        if not tenant:
+            return jsonify({"error": "DB indisponible"}), 503
+        try:
+            tenant.admin_force_unclaimed(device_id)
+            return jsonify({"ok": True, "status": "unclaimed"})
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @app.route("/api/admin/devices/<device_id>/resend-config", methods=["POST"])
+    @require_auth(admin=True)
+    def api_admin_device_resend(device_id: str) -> Any:
+        tenant = tenant_store_from_env()
+        if not tenant:
+            return jsonify({"error": "DB indisponible"}), 503
+        dev = tenant.get_device(device_id)
+        if not dev:
+            return jsonify({"error": "Station inconnue"}), 404
+        pub = publish_set_device_id(get_mqtt_publish, device_id, dev["mac"])
+        return jsonify({"ok": True, "mqtt": pub})
+
+    @app.route("/api/admin/view-client", methods=["GET"])
+    @require_auth(admin=True)
+    def api_admin_view_client() -> Any:
+        user_id = request.args.get("user_id", "").strip()
+        device_id = request.args.get("device", "").strip()
+        tenant = tenant_store_from_env()
+        email = ""
+        if tenant and user_id:
+            u = tenant.get_user_by_id(user_id)
+            if u:
+                email = u.get("email", "")
+        return jsonify({"user_id": user_id, "device_id": device_id, "email": email})
 
     @app.route("/api/admin/pending/<int:pending_id>/approve", methods=["POST"])
     @require_auth(admin=True)

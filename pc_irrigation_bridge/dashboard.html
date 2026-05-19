@@ -50,6 +50,10 @@ code{font-size:.85em}
 </style>
 </head>
 <body>
+<div id="admin_view_banner" style="display:none;margin-bottom:.75rem;padding:.65rem 1rem;background:#1e3a5f;border:1px solid #2a3544;border-radius:8px;font-size:.9rem">
+Vue administrateur — <span id="admin_view_label"></span>
+<a href="/admin" style="margin-left:1rem">Retour administration</a>
+</div>
 <div id="userbar" style="margin-bottom:.75rem;font-size:.88rem;color:var(--muted)">
 <span id="user_email"></span>
 <label style="display:inline;margin-left:.75rem">Station</label>
@@ -136,7 +140,7 @@ code{font-size:.85em}
 <div class="grid" id="cards"><div class="card"><h2>En attente</h2><div class="val">—<small> </small></div></div></div>
 <p id="lastupd"></p>
 
-<div class="panel" style="margin-top:1rem;max-width:420px">
+<div class="panel" id="account_panel" style="margin-top:1rem;max-width:420px">
 <h2 style="margin:0 0 .5rem;font-size:1rem">Compte station</h2>
 <p class="sub" style="margin:0 0 .5rem">Transfert (vente) : libere la carte pour un autre utilisateur. Reactivation : apres reset usine sur la carte.</p>
 <button type="button" class="secondary" id="btn_transfer">Transferer ma station</button>
@@ -149,6 +153,9 @@ code{font-size:.85em}
 const authToken=()=>sessionStorage.getItem("irrigation_token")||"";
 let currentDevice="";
 let authEnabled=false;
+const urlParams=new URLSearchParams(location.search);
+const adminViewMode=urlParams.get("admin_view")==="1";
+const urlViewDevice=urlParams.get("device")||"";
 async function authFetch(url,opts={}){
   opts.headers=Object.assign({},opts.headers||{});
   if(authToken()) opts.headers["Authorization"]="Bearer "+authToken();
@@ -177,15 +184,38 @@ async function initAuth(){
   btnOut.style.display="inline-block";
   btnOut.onclick=()=>{ sessionStorage.removeItem("irrigation_token"); location.href="/login"; };
   const me=await authFetch("/api/me");
-  if(!me.ok){ sessionStorage.removeItem("irrigation_token"); location.href="/login"; return; }
+  if(!me.ok){
+    sessionStorage.removeItem("irrigation_token");
+    setTimeout(()=>{ location.href="/login"; },2500);
+    document.getElementById("poll_err").textContent="Session invalide — reconnectez-vous.";
+    return;
+  }
   const u=await me.json();
+  if(u.is_admin&&!adminViewMode){ location.href="/admin"; return; }
   document.getElementById("user_email").textContent=u.email||"";
   if(u.is_admin) linkAdmin.style.display="inline";
   const sel=document.getElementById("device_sel");
   const devs=u.devices||[];
   sel.innerHTML="";
-  devs.forEach(d=>{ const o=document.createElement("option"); o.value=d; o.textContent=d; sel.appendChild(o); });
-  if(devs.length) currentDevice=devs[0];
+  if(adminViewMode&&urlViewDevice){
+    const o=document.createElement("option");
+    o.value=urlViewDevice; o.textContent=urlViewDevice; sel.appendChild(o);
+    currentDevice=urlViewDevice;
+    document.getElementById("admin_view_banner").style.display="block";
+    const uid=urlParams.get("user_id")||"";
+    document.getElementById("admin_view_label").textContent=
+      (urlParams.get("email")||uid||"client")+" — station "+urlViewDevice;
+    const acc=document.querySelector(".panel:last-of-type");
+    const accPanel=document.getElementById("account_panel");
+    if(accPanel) accPanel.style.display="none";
+  }else{
+    devs.forEach(d=>{ const o=document.createElement("option"); o.value=d; o.textContent=d; sel.appendChild(o); });
+    if(devs.length) currentDevice=devs[0];
+    else if(u.is_admin) {
+      const o=document.createElement("option"); o.value="station01"; o.textContent="station01"; sel.appendChild(o);
+      currentDevice="station01";
+    }
+  }
   sel.onchange=()=>{ currentDevice=sel.value; poll(); };
 }
 const CROP_L=["Maize","Rice","Tomato","Wheat"];

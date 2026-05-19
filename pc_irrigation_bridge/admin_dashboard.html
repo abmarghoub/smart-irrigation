@@ -3,122 +3,314 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Admin — Irrigation</title>
+<title>Administration — AgriPulse Irrigation</title>
 <style>
-:root{--bg:#0f1419;--card:#1a2332;--txt:#e7ecf3;--muted:#8b9cb3;--acc:#3d9cf9;--ok:#34c759;--warn:#f0ad4e}
+:root{--bg:#0f1419;--card:#1a2332;--txt:#e7ecf3;--muted:#8b9cb3;--acc:#3d9cf9;--side:#12181f}
 *{box-sizing:border-box}
-body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--txt);padding:1rem;max-width:1100px;margin-inline:auto}
-h1{font-size:1.25rem}
-.sub{color:var(--muted);font-size:.85rem;margin-bottom:1rem}
-table{width:100%;border-collapse:collapse;font-size:.85rem;margin:.5rem 0 1rem}
+body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh;display:flex}
+nav{width:220px;background:var(--side);border-right:1px solid #2a3544;padding:1rem 0;flex-shrink:0}
+nav h1{font-size:1rem;margin:0 1rem .75rem;color:var(--acc)}
+nav a{display:block;padding:.55rem 1rem;color:var(--muted);text-decoration:none;font-size:.9rem;border-left:3px solid transparent}
+nav a:hover,nav a.active{color:var(--txt);background:#1a2332;border-left-color:var(--acc)}
+main{flex:1;padding:1rem 1.25rem;overflow:auto}
+.sec{display:none}.sec.active{display:block}
+h2{font-size:1.15rem;margin:0 0 1rem}
+.kpi{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:.75rem;margin-bottom:1.25rem}
+.kpi .card{background:var(--card);border:1px solid #2a3544;border-radius:10px;padding:.85rem}
+.kpi .n{font-size:1.5rem;font-weight:700}
+.kpi .l{font-size:.72rem;color:var(--muted);margin-top:.2rem}
+table{width:100%;border-collapse:collapse;font-size:.82rem;margin:.5rem 0}
 th,td{border:1px solid #2a3544;padding:.45rem .5rem;text-align:left}
-th{background:#1a2332;color:var(--muted);font-weight:600}
-button{padding:.4rem .75rem;border:none;border-radius:6px;background:var(--acc);color:#fff;cursor:pointer;font-size:.8rem}
-button.danger{background:#c44}
+th{background:var(--card);color:var(--muted)}
+button{padding:.4rem .7rem;border:none;border-radius:6px;background:var(--acc);color:#fff;cursor:pointer;font-size:.8rem;margin:.1rem}
 button.secondary{background:#2a3544}
-#msg{margin:.75rem 0;min-height:1.2em;font-size:.9rem}
-#msg.err{color:#ff6b6b}
-a{color:var(--acc)}
-.sec{margin:1.5rem 0 .5rem;font-size:1rem;border-bottom:1px solid #2a3544;padding-bottom:.35rem}
+button.danger{background:#a33}
+input,select{padding:.45rem;border-radius:6px;border:1px solid #2a3544;background:#0f1419;color:var(--txt)}
+.form-grid{display:grid;gap:.5rem;max-width:420px;margin:1rem 0;padding:1rem;background:var(--card);border-radius:8px;border:1px solid #2a3544}
+.form-grid label{font-size:.78rem;color:var(--muted)}
+#global_msg{min-height:1.2em;margin-bottom:.5rem;font-size:.9rem}
+#global_msg.err{color:#ff6b6b}
+.toolbar{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem;align-items:center}
+.sub{font-size:.85rem;color:var(--muted)}
+@media(max-width:768px){body{flex-direction:column}nav{width:100%}}
 </style>
 </head>
 <body>
-<h1>Administration stations</h1>
-<p class="sub">Validez les inscriptions, assignez les <code>device_id</code>, consultez l’état MQTT. <a href="/">Dashboard client</a> · <a href="/login">Connexion</a></p>
-<p id="msg"></p>
+<nav>
+<h1>AgriPulse Admin</h1>
+<a href="#" data-sec="accueil" class="active">Accueil</a>
+<a href="#" data-sec="utilisateurs">Utilisateurs</a>
+<a href="#" data-sec="cartes">Cartes / Stations</a>
+<a href="#" data-sec="demandes">Demandes</a>
+<a href="#" data-sec="sante">Sante systeme</a>
+<a href="#" id="nav_logout" style="margin-top:1rem">Deconnexion</a>
+</nav>
+<main>
+<p id="global_msg"></p>
 
-<h2 class="sec">Demandes en attente</h2>
-<div id="pending_wrap"><p class="sub">Chargement…</p></div>
-<h2 class="sec">Cartes vues récemment (hello MQTT)</h2>
-<div id="hello_wrap"><p class="sub">—</p></div>
-<h2 class="sec">Stations enregistrées</h2>
-<div id="devices_wrap"><p class="sub">Chargement…</p></div>
+<section id="sec_accueil" class="sec active">
+<h2>Accueil</h2>
+<div class="kpi" id="kpi_grid"></div>
+<h3 class="sub">Demandes recentes</h3>
+<div id="recent_pending"></div>
+<h3 class="sub">Hello MQTT recents</h3>
+<div id="recent_hellos"></div>
+</section>
+
+<section id="sec_utilisateurs" class="sec">
+<h2>Utilisateurs</h2>
+<div class="toolbar">
+<input type="search" id="user_search" placeholder="Filtrer…"/>
+<button type="button" id="btn_toggle_create" class="secondary">+ Nouvel utilisateur</button>
+</div>
+<div id="user_create_form" class="form-grid" style="display:none">
+<label>Email</label><input id="new_email" type="email"/>
+<label>Mot de passe (6+)</label><input id="new_password" type="password"/>
+<label>Prenom</label><input id="new_first"/>
+<label>Nom</label><input id="new_last"/>
+<label>Station optionnelle</label><input id="new_device" placeholder="station_xxxxxx"/>
+<button type="button" id="btn_create_user">Creer le compte</button>
+</div>
+<div id="users_table_wrap"></div>
+</section>
+
+<section id="sec_cartes" class="sec">
+<h2>Cartes / Stations</h2>
+<div class="toolbar">
+<button type="button" class="secondary dev-f" data-f="all">Toutes</button>
+<button type="button" class="secondary dev-f" data-f="active">Actives</button>
+<button type="button" class="secondary dev-f" data-f="pending">En attente</button>
+<button type="button" class="secondary dev-f" data-f="hello">Hello MQTT</button>
+<button type="button" class="secondary dev-f" data-f="unclaimed">Liberees</button>
+</div>
+<div id="devices_table_wrap"></div>
+</section>
+
+<section id="sec_demandes" class="sec">
+<h2>Demandes en attente</h2>
+<div id="pending_only_wrap"></div>
+</section>
+
+<section id="sec_sante" class="sec">
+<h2>Sante</h2>
+<p class="sub"><a href="/api/health" target="_blank" rel="noopener">/api/health</a> (JSON brut)</p>
+<pre id="health_pre" style="background:var(--card);padding:1rem;border-radius:8px;font-size:.78rem;overflow:auto"></pre>
+</section>
+</main>
 
 <script>
-function token(){ return sessionStorage.getItem("irrigation_token")||""; }
-function authHeaders(){
-  const t=token();
-  const h={"Content-Type":"application/json"};
-  if(t) h["Authorization"]="Bearer "+t;
-  return h;
+const tok=()=>sessionStorage.getItem("irrigation_token")||"";
+function hdr(){const h={};if(tok())h.Authorization="Bearer "+tok();return h;}
+async function api(p,o={}){o.headers=Object.assign(hdr(),o.headers||{});if(o.body&&typeof o.body==="object"&&!(o.body instanceof FormData)){o.body=JSON.stringify(o.body);o.headers["Content-Type"]="application/json";}return fetch(p,o);}
+function msg(t,e){const m=document.getElementById("global_msg");m.textContent=t;m.className=e?"err":"";}
+function esc(s){return String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");}
+function jsq(s){return String(s??"").replace(/\\/g,"\\\\").replace(/'/g,"\\'");}
+
+let devFilter="all", allUsers=[];
+
+async function boot(){
+  if(!tok()){location.href="/login?next=/admin";return;}
+  const me=await api("/api/me");
+  if(!me.ok){sessionStorage.removeItem("irrigation_token");location.href="/login";return;}
+  const u=await me.json();
+  if(!u.is_admin){msg("Acces refuse — compte non administrateur.",true);return;}
+  bindNav();
+  showSec("accueil");
 }
-function showMsg(t,err){ const m=document.getElementById("msg"); m.textContent=t; m.className=err?"err":""; }
-async function readJson(r){
-  const text=await r.text();
-  try{return JSON.parse(text);}catch(_){ throw new Error("HTTP "+r.status); }
-}
-async function ensureAdmin(){
-  const cfg=await fetch("/api/auth/config").then(r=>r.json()).catch(()=>({}));
-  if(cfg.auth_enabled===false){ showMsg("Auth desactivee — acces admin local.",false); return true; }
-  if(!token()){ location.href="/login?next=/admin"; return false; }
-  const me=await fetch("/api/me",{headers:authHeaders()});
-  if(!me.ok){ location.href="/login?next=/admin"; return false; }
-  const j=await readJson(me);
-  if(!j.is_admin){ showMsg("Acces refuse : compte non administrateur.",true); return false; }
-  return true;
-}
-function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
-async function loadPending(){
-  const r=await fetch("/api/admin/pending",{headers:authHeaders()});
-  const j=await readJson(r);
-  if(!r.ok){ document.getElementById("pending_wrap").innerHTML="<p class=sub>"+esc(j.error)+"</p>"; return; }
-  const rows=j.pending||[];
-  if(!rows.length){ document.getElementById("pending_wrap").innerHTML="<p class=sub>Aucune demande.</p>"; return; }
-  let html="<table><tr><th>ID</th><th>MAC</th><th>Nom</th><th>Email</th><th>Date</th><th></th></tr>";
-  for(const p of rows){
-    html+="<tr><td>"+p.id+"</td><td><code>"+esc(p.mac)+"</code></td><td>"+esc(p.first_name)+" "+esc(p.last_name)+"</td><td>"+esc(p.email)+"</td><td>"+esc(p.created_at)+"</td><td>";
-    html+="<button data-approve='"+p.id+"'>Valider</button> <button class=danger data-reject='"+p.id+"'>Refuser</button></td></tr>";
-  }
-  html+="</table>";
-  document.getElementById("pending_wrap").innerHTML=html;
-  document.querySelectorAll("[data-approve]").forEach(btn=>{
-    btn.onclick=async()=>{
-      const id=btn.getAttribute("data-approve");
-      const r=await fetch("/api/admin/pending/"+id+"/approve",{method:"POST",headers:authHeaders()});
-      const j=await readJson(r);
-      if(r.ok){ showMsg("Approuve : device_id="+j.device_id,false); loadAll(); }
-      else showMsg(j.error||"Echec",true);
-    };
+
+function bindNav(){
+  document.querySelectorAll("nav a[data-sec]").forEach(a=>{
+    a.onclick=e=>{e.preventDefault();showSec(a.dataset.sec);};
   });
-  document.querySelectorAll("[data-reject]").forEach(btn=>{
-    btn.onclick=async()=>{
-      const id=btn.getAttribute("data-reject");
-      const r=await fetch("/api/admin/pending/"+id+"/reject",{method:"POST",headers:authHeaders(),body:JSON.stringify({notes:"refuse admin"})});
-      if(r.ok){ showMsg("Demande refusee.",false); loadPending(); }
-    };
+  document.getElementById("nav_logout").onclick=e=>{
+    e.preventDefault();sessionStorage.removeItem("irrigation_token");location.href="/login";
+  };
+  document.getElementById("btn_toggle_create").onclick=()=>{
+    const f=document.getElementById("user_create_form");
+    f.style.display=f.style.display==="none"?"grid":"none";
+  };
+  document.getElementById("btn_create_user").onclick=createUser;
+  document.getElementById("user_search").oninput=()=>renderUsers();
+  document.querySelectorAll(".dev-f").forEach(b=>{
+    b.onclick=()=>{devFilter=b.dataset.f;loadDevices();};
   });
 }
-async function loadHello(){
-  const r=await fetch("/api/admin/provisioning_hellos",{headers:authHeaders()});
-  if(!r.ok){ document.getElementById("hello_wrap").innerHTML="<p class=sub>—</p>"; return; }
-  const j=await readJson(r);
-  const rows=j.hellos||[];
-  if(!rows.length){ document.getElementById("hello_wrap").innerHTML="<p class=sub>Aucun hello recent.</p>"; return; }
-  let html="<table><tr><th>MAC</th><th>Vu</th><th>IP</th></tr>";
-  for(const h of rows){
-    html+="<tr><td><code>"+esc(h.mac)+"</code></td><td>"+esc(h.at_iso||h.at)+"</td><td>"+esc(h.ip||"")+"</td></tr>";
-  }
-  html+="</table>";
-  document.getElementById("hello_wrap").innerHTML=html;
+
+function showSec(name){
+  document.querySelectorAll(".sec").forEach(s=>s.classList.remove("active"));
+  document.querySelectorAll("nav a[data-sec]").forEach(a=>a.classList.toggle("active",a.dataset.sec===name));
+  document.getElementById("sec_"+name).classList.add("active");
+  if(name==="accueil")loadStats();
+  if(name==="utilisateurs")loadUsers();
+  if(name==="cartes")loadDevices();
+  if(name==="demandes")loadPendingOnly();
+  if(name==="sante")loadHealth();
 }
+
+async function loadStats(){
+  const r=await api("/api/admin/stats");
+  if(!r.ok){msg("Erreur stats",true);return;}
+  const s=await r.json();
+  const kpis=[
+    ["Utilisateurs",s.users_total],["Cartes",s.devices_total],["Actives",s.devices_active],
+    ["Demandes",s.pending_count],["Liberees",s.devices_unclaimed],["Sans station",s.users_without_station],
+    ["Telemetry jour",s.telemetry_rows_today],["MQTT",s.mqtt_connected?"OK":"Non"],["Messages RX",s.mqtt_rx_count],
+    ["Dernier RX",s.last_mqtt_rx_at?new Date(s.last_mqtt_rx_at*1000).toLocaleString():"—"]
+  ];
+  document.getElementById("kpi_grid").innerHTML=kpis.map(([l,n])=>
+    `<div class="card"><div class="n">${esc(n)}</div><div class="l">${esc(l)}</div></div>`
+  ).join("");
+  let phtml="<table><tr><th>MAC</th><th>Email</th><th>Date</th></tr>";
+  for(const p of (s.recent_pending||[])){
+    phtml+=`<tr><td>${esc(p.mac)}</td><td>${esc(p.email)}</td><td>${esc(p.created_at)}</td></tr>`;
+  }
+  document.getElementById("recent_pending").innerHTML=phtml+"</table>";
+  let hhtml="<table><tr><th>MAC</th><th>IP</th></tr>";
+  for(const h of (s.recent_hellos||[])){
+    hhtml+=`<tr><td>${esc(h.mac)}</td><td>${esc(h.ip)}</td></tr>`;
+  }
+  document.getElementById("recent_hellos").innerHTML=hhtml+"</table>";
+}
+
+async function loadUsers(){
+  const r=await api("/api/admin/users");
+  if(!r.ok){msg("Erreur chargement utilisateurs",true);return;}
+  const j=await r.json();
+  allUsers=j.users||[];
+  renderUsers();
+}
+
+function renderUsers(){
+  const q=(document.getElementById("user_search").value||"").toLowerCase();
+  const rows=allUsers.filter(u=>{
+    const hay=(u.email+" "+u.first_name+" "+u.last_name).toLowerCase();
+    return !q||hay.includes(q);
+  });
+  let html="<table><tr><th>Email</th><th>Nom</th><th>Stations</th><th>Admin</th><th>Dashboard</th><th>Actions</th></tr>";
+  for(const u of rows){
+    const devs=(u.device_ids||[]).join(", ")||"—";
+    const dashBtn=u.device_ids&&u.device_ids.length
+      ?`<button class="secondary" onclick="viewDash('${jsq(u.id)}','${jsq(u.device_ids[0])}','${jsq(u.email)}')">Voir</button>`
+      :"—";
+    html+=`<tr><td>${esc(u.email)}</td><td>${esc(u.first_name)} ${esc(u.last_name)}</td><td>${esc(devs)}</td>
+      <td>${u.is_admin?"oui":"non"}</td><td>${dashBtn}</td>
+      <td><button class="secondary" onclick="editUser('${jsq(u.id)}')">Modifier</button>
+      <button class="danger" onclick="delUser('${jsq(u.id)}','${jsq(u.email)}')">Suppr.</button></td></tr>`;
+  }
+  document.getElementById("users_table_wrap").innerHTML=html+"</table>";
+}
+
+window.viewDash=function(uid,did,email){
+  const u=`/view?admin_view=1&user_id=${encodeURIComponent(uid)}&device=${encodeURIComponent(did)}&email=${encodeURIComponent(email)}`;
+  window.open(u,"_blank");
+};
+
+window.editUser=async function(id){
+  const u=allUsers.find(x=>x.id===id);
+  if(!u)return;
+  const fn=prompt("Prenom",u.first_name||""); if(fn===null)return;
+  const ln=prompt("Nom",u.last_name||""); if(ln===null)return;
+  const r=await api("/api/admin/users/"+id,{method:"PATCH",body:{first_name:fn,last_name:ln}});
+  if(r.ok){msg("Utilisateur mis a jour.");loadUsers();}else msg("Echec modification",true);
+};
+
+window.delUser=async function(id,email){
+  if(!confirm("Supprimer "+email+" ? (historique telemetry conserve)"))return;
+  const r=await api("/api/admin/users/"+id,{method:"DELETE"});
+  if(r.ok){msg("Utilisateur supprime.");loadUsers();}else msg("Echec suppression",true);
+};
+
+async function createUser(){
+  const r=await api("/api/admin/users",{method:"POST",body:{
+    email:document.getElementById("new_email").value.trim(),
+    password:document.getElementById("new_password").value,
+    first_name:document.getElementById("new_first").value.trim(),
+    last_name:document.getElementById("new_last").value.trim(),
+    device_id:document.getElementById("new_device").value.trim()
+  }});
+  const j=await r.json();
+  if(r.ok){msg("Utilisateur cree.");document.getElementById("user_create_form").style.display="none";loadUsers();}
+  else msg(j.error||"Echec",true);
+}
+
 async function loadDevices(){
-  const r=await fetch("/api/admin/devices",{headers:authHeaders()});
-  const j=await readJson(r);
-  if(!r.ok){ document.getElementById("devices_wrap").innerHTML="<p class=sub>"+esc(j.error)+"</p>"; return; }
-  const rows=j.devices||[];
-  if(!rows.length){ document.getElementById("devices_wrap").innerHTML="<p class=sub>Aucune station.</p>"; return; }
-  let html="<table><tr><th>device_id</th><th>MAC</th><th>Statut</th><th>Proprietaire</th><th>WiFi live</th><th>IP</th></tr>";
-  for(const d of rows){
-    html+="<tr><td><code>"+esc(d.device_id)+"</code></td><td><code>"+esc(d.mac)+"</code></td><td>"+esc(d.status)+"</td><td>"+esc(d.current_owner_id||"—")+"</td><td>"+(d.wifi_connected?"oui":"non")+"</td><td>"+esc(d.last_ip||"")+"</td></tr>";
+  const r=await api("/api/admin/devices?status="+encodeURIComponent(devFilter));
+  if(!r.ok){msg("Erreur cartes",true);return;}
+  const j=await r.json();
+  if(devFilter==="hello"){
+    let h="<table><tr><th>MAC</th><th>IP</th><th>Vu</th></tr>";
+    for(const x of (j.hellos||[])){
+      const when=x.at?new Date(x.at*1000).toLocaleString():"—";
+      h+=`<tr><td>${esc(x.mac)}</td><td>${esc(x.ip)}</td><td>${esc(when)}</td></tr>`;
+    }
+    document.getElementById("devices_table_wrap").innerHTML=h+"</table>";
+    return;
   }
-  html+="</table>";
-  document.getElementById("devices_wrap").innerHTML=html;
+  let html="<table><tr><th>device_id</th><th>MAC</th><th>Statut</th><th>Proprietaire</th><th>WiFi</th><th>IP</th><th>Actions</th></tr>";
+  for(const d of (j.devices||[])){
+    html+=`<tr><td><code>${esc(d.device_id)}</code></td><td>${esc(d.mac)}</td><td>${esc(d.status)}</td>
+      <td>${esc(d.owner_email||"—")}</td><td>${d.wifi_connected?"oui":"non"}</td><td>${esc(d.last_ip||"")}</td>
+      <td>
+        <button class="secondary" onclick="assignDev('${jsq(d.device_id)}')">Assigner</button>
+        <button class="secondary" onclick="resendCfg('${jsq(d.device_id)}')">MQTT config</button>
+        <button class="danger" onclick="unclaimDev('${jsq(d.device_id)}')">Liberer</button>
+      </td></tr>`;
+  }
+  if(devFilter==="all"||devFilter==="pending"){
+    for(const p of (j.pending||[])){
+      html+=`<tr><td colspan="2"><em>pending #${p.id}</em></td><td>pending</td><td>${esc(p.email)}</td><td colspan="2">${esc(p.mac)}</td>
+        <td><button onclick="approvePending(${p.id})">Valider</button>
+        <button class="danger" onclick="rejectPending(${p.id})">Refuser</button></td></tr>`;
+    }
+  }
+  document.getElementById("devices_table_wrap").innerHTML=html+"</table>";
 }
-async function loadAll(){ await Promise.all([loadPending(),loadHello(),loadDevices()]); }
-(async()=>{
-  if(await ensureAdmin()) loadAll();
-  setInterval(loadAll,15000);
-})();
+
+window.assignDev=async function(did){
+  const uid=prompt("UUID utilisateur (id)"); if(!uid)return;
+  const r=await api("/api/admin/devices/"+did+"/assign",{method:"POST",body:{user_id:uid}});
+  if(r.ok){msg("Assigne.");loadDevices();}else msg("Echec assignation",true);
+};
+window.unclaimDev=async function(did){
+  if(!confirm("Liberer "+did+" ?"))return;
+  const r=await api("/api/admin/devices/"+did+"/unclaim",{method:"POST"});
+  if(r.ok){msg("Station liberee.");loadDevices();}else msg("Echec",true);
+};
+window.resendCfg=async function(did){
+  const r=await api("/api/admin/devices/"+did+"/resend-config",{method:"POST"});
+  if(r.ok)msg("Config MQTT envoyee.");else msg("Echec MQTT",true);
+};
+window.approvePending=async function(id){
+  const r=await api("/api/admin/pending/"+id+"/approve",{method:"POST"});
+  const j=await r.json();
+  if(r.ok){msg("Approuve : "+j.device_id);loadDevices();loadStats();}else msg(j.error||"Echec",true);
+};
+window.rejectPending=async function(id){
+  const r=await api("/api/admin/pending/"+id+"/reject",{method:"POST",body:{notes:"refuse"}});
+  if(r.ok){msg("Refuse.");loadDevices();}else msg("Echec",true);
+};
+
+async function loadPendingOnly(){
+  const r=await api("/api/admin/pending");
+  if(!r.ok)return;
+  const j=await r.json();
+  let html="<table><tr><th>ID</th><th>MAC</th><th>Email</th><th>Nom</th><th></th></tr>";
+  for(const p of (j.pending||[])){
+    html+=`<tr><td>${p.id}</td><td>${esc(p.mac)}</td><td>${esc(p.email)}</td><td>${esc(p.first_name)} ${esc(p.last_name)}</td>
+      <td><button onclick="approvePending(${p.id})">Valider</button>
+      <button class="danger" onclick="rejectPending(${p.id})">Refuser</button></td></tr>`;
+  }
+  document.getElementById("pending_only_wrap").innerHTML=html+"</table>";
+}
+
+async function loadHealth(){
+  const r=await fetch("/api/health");
+  const t=await r.text();
+  try{document.getElementById("health_pre").textContent=JSON.stringify(JSON.parse(t),null,2);}
+  catch(_){document.getElementById("health_pre").textContent=t;}
+}
+
+boot();
 </script>
 </body>
 </html>

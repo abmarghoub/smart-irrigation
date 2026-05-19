@@ -811,6 +811,20 @@ def main() -> None:
     app.run(host=ns.http_host, port=ns.http_port, debug=False, threaded=True)
 
 
+def _health_snapshot() -> dict[str, Any]:
+    mqtt_ok = False
+    if _mqtt_client is not None:
+        try:
+            mqtt_ok = bool(_mqtt_client.is_connected())
+        except Exception:
+            mqtt_ok = False
+    return {
+        "mqtt": mqtt_ok,
+        "last_mqtt_rx_at": _last_mqtt_rx_at,
+        "mqtt_rx_count": _mqtt_rx_count,
+    }
+
+
 register_multi_routes(
     app,
     get_states=lambda: _device_states,
@@ -822,6 +836,7 @@ register_multi_routes(
     parse_export_date=_parse_export_date,
     csv_export_filename=_csv_export_filename,
     csv_response_from_rows=_csv_response_from_rows,
+    get_health_snapshot=_health_snapshot,
 )
 
 # Gunicorn (Render) importe ce module : ne pas lire sys.argv (contient "bridge:app", --bind, etc.)

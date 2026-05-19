@@ -56,7 +56,17 @@ document.getElementById("login").onsubmit=async(e)=>{
     const j=await r.json();
     if(!r.ok||!j.access_token){ msg.textContent=j.error_description||j.msg||"Echec connexion"; return; }
     sessionStorage.setItem("irrigation_token",j.access_token);
-    location.href="/";
+    const me=await fetch("/api/me",{headers:{Authorization:"Bearer "+j.access_token}});
+  if(me.ok){
+    const u=await me.json();
+    if(u.is_admin){
+      const next=new URLSearchParams(location.search).get("next");
+      location.href=(next&&next.startsWith("/admin"))?next:"/admin";
+      return;
+    }
+  }
+  const next=new URLSearchParams(location.search).get("next");
+  location.href=next&&next.startsWith("/")&&!next.startsWith("/admin")?next:"/";
   }catch(err){ msg.textContent=String(err); }
 };
 loadConfig().then(cfg=>{
