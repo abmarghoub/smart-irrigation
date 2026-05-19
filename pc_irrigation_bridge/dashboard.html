@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Irrigation — Dashboard (PC)</title>
+<title>Station d'irrigation</title>
 <style>
 :root{--bg:#0f1419;--card:#1a2332;--txt:#e7ecf3;--muted:#8b9cb3;--acc:#3d9cf9;--ok:#34c759;--bar:#2d6cdf;}
 *{box-sizing:border-box}
@@ -18,7 +18,8 @@ input,select{width:100%;padding:.5rem;border-radius:8px;border:1px solid #2a3544
 button{margin-top:.75rem;padding:.55rem 1rem;border:none;border-radius:8px;background:var(--acc);color:#fff;font-weight:600;cursor:pointer}
 button.secondary{background:#2a3544;color:var(--txt)}
 button.secondary:hover{filter:brightness(1.12)}
-#msg{margin-top:.5rem;font-size:.85rem}
+#msg{margin-top:.5rem;font-size:.85rem;color:var(--ok)}
+#msg.err{color:#ff6b6b}
 #poll_err{color:#ff6b6b;font-size:.9rem;min-height:1.2em;margin:.25rem 0 1rem}
 #conn_block{margin-top:.75rem;font-size:.88rem;line-height:1.5;border-top:1px solid #2a3544;padding-top:.65rem}
 #conn_block strong{color:var(--txt);font-weight:600}
@@ -43,7 +44,7 @@ code{font-size:.85em}
 </style>
 </head>
 <body>
-<h1>Station d'irrigation (dashboard local)</h1>
+<h1>Station d'irrigation</h1>
 <p id="poll_err"></p>
 
 <div class="row">
@@ -68,7 +69,7 @@ code{font-size:.85em}
 <option value="2">2 — Sandy</option>
 <option value="3">3 — Silty</option>
 </select>
-<button type="submit">Appliquer (MQTT)</button>
+<button type="submit">Appliquer</button>
 <p id="msg"></p>
 </form>
 </div>
@@ -84,11 +85,29 @@ code{font-size:.85em}
 </div>
 </div>
 
-<h2 class="sec">Journal CSV</h2>
+<h2 class="sec">Export CSV</h2>
 <div class="chart-panel">
-<p class="sub" style="margin:0 0 .75rem">Export genere depuis la <strong>base Supabase</strong> a chaque clic (historique MQTT complet).</p>
-<button type="button" class="secondary" id="btn_dl_csv">Télécharger irrigation_log.csv</button>
+<p class="sub" style="margin:0 0 .75rem">Seules les lignes completes (saisie + prediction MLP) sont enregistrees en base.</p>
+<form id="csv_export">
+<label style="display:flex;align-items:center;gap:.4rem;margin:.35rem 0"><input type="radio" name="csv_scope" value="all" checked/> Tout le dataset</label>
+<label style="display:flex;align-items:center;gap:.4rem;margin:.35rem 0"><input type="radio" name="csv_scope" value="filter"/> Filtrer</label>
+<div id="csv_filters" style="display:none;margin-top:.5rem;padding-top:.5rem;border-top:1px solid #2a3544">
+<label>Culture</label>
+<select id="csv_crop">
+<option value="">Toutes</option>
+<option value="Maize">Maize</option>
+<option value="Rice">Rice</option>
+<option value="Tomato">Tomato</option>
+<option value="Wheat">Wheat</option>
+</select>
+<label>Date debut</label>
+<input type="date" id="csv_from"/>
+<label>Date fin</label>
+<input type="date" id="csv_to"/>
+</div>
+<button type="submit" class="secondary" style="margin-top:.75rem">Telecharger CSV</button>
 <p id="csv_dl_msg" class="sub" style="margin-top:.5rem"></p>
+</form>
 </div>
 
 <h2 class="sec">Indicateurs visuels (barres)</h2>
@@ -173,13 +192,14 @@ async function poll(){
     const j=await readJson(r);
     let h={};
     if(rh.ok){ try{ h=await readJson(rh); }catch(_e){} }
-    const cloudEl=document.getElementById("cloud_mqtt");
-    if(h.mqtt_rx_hint){ cloudEl.textContent=h.mqtt_rx_hint; }
-    else if(h.mqtt){ cloudEl.textContent="Cloud MQTT : connecte"; }
-  else { cloudEl.textContent=""; }
+    document.getElementById("cloud_mqtt").textContent="";
     if(j.note&&!j.sensors){
-      errEl.textContent=j.note+(h.mqtt_rx_hint?" — "+h.mqtt_rx_hint:"");
-    }else{ errEl.textContent=h.mqtt_rx_hint&&h.last_mqtt_rx_at===0?h.mqtt_rx_hint:""; }
+      errEl.textContent=j.note;
+    }else if(h.last_mqtt_rx_at===0&&h.mqtt_rx_hint){
+      errEl.textContent=h.mqtt_rx_hint;
+    }else{
+      errEl.textContent="";
+    }
     if(j.ip&&j.wifi_connected){
       document.getElementById("ip").innerHTML="IP (ESP32) : <strong>"+j.ip+"</strong> ✓";
     }else if(h.mqtt&&h.last_mqtt_rx_at===0){
@@ -257,28 +277,54 @@ document.getElementById("f").onsubmit=async (e)=>{
     msg.textContent="Remplissez age, culture et sol avant Appliquer.";
     return;
   }
-  msg.textContent="Envoi MQTT…";
+  msg.textContent="";
+  msg.classList.remove("err");
   const body=new URLSearchParams({crop_age_days:age,crop_idx:ci,soil_idx:si});
   try{
     const r=await fetch(window.location.origin+"/api/manual",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
     const t=await readJson(r);
     if(r.ok&&t&&t.ok){
       formDirty=false;
-      const tops=(t.topics||[]).map(x=>x.topic+(x.published?" OK":" ECHEC (ACL?)")).join(", ");
-      const via=t.via?(" via "+t.via):"";
-      msg.textContent="MQTT"+via+": "+(tops||"envoye")+". Attendez ~5 s — serie ESP : [MQTT] RX topic=.../command/relay";
+      msg.textContent="Saisie mise a jour.";
+      setTimeout(()=>{ if(msg.textContent==="Saisie mise a jour.") msg.textContent=""; }, 3000);
       setTimeout(poll,1500);
       setTimeout(poll,5000);
     }else{
-      msg.textContent="Echec: "+(t&&t.error?t.error:JSON.stringify(t));
+      msg.classList.add("err");
+      msg.textContent="Echec envoi : "+(t&&t.error?t.error:"verifiez la connexion");
     }
     poll();
-  }catch(err){msg.textContent="Erreur reseau: "+(err&&err.message?err.message:String(err));}
+  }catch(err){
+    msg.classList.add("err");
+    msg.textContent="Erreur reseau : "+(err&&err.message?err.message:String(err));
+  }
 };
-document.getElementById("btn_dl_csv").onclick=async function(){
+document.querySelectorAll('input[name="csv_scope"]').forEach(r=>{
+  r.addEventListener("change",()=>{
+    document.getElementById("csv_filters").style.display=
+      document.querySelector('input[name="csv_scope"]:checked')?.value==="filter"?"block":"none";
+  });
+});
+document.getElementById("csv_export").onsubmit=async function(e){
+  e.preventDefault();
   const msg=document.getElementById("csv_dl_msg");
-  msg.textContent="Generation depuis la base…";
-  const u=window.location.origin+"/api/irrigation_log.csv";
+  msg.textContent="Preparation du fichier…";
+  const scope=document.querySelector('input[name="csv_scope"]:checked')?.value||"all";
+  const q=new URLSearchParams();
+  if(scope==="filter"){
+    const crop=document.getElementById("csv_crop").value;
+    const from=document.getElementById("csv_from").value;
+    const to=document.getElementById("csv_to").value;
+    if(crop) q.set("crop",crop);
+    if(from) q.set("from",from);
+    if(to) q.set("to",to);
+    if(from&&to&&from>to){
+      msg.textContent="La date de debut doit etre avant la date de fin.";
+      return;
+    }
+  }
+  const qs=q.toString();
+  const u=window.location.origin+"/api/irrigation_log.csv"+(qs?"?"+qs:"");
   try{
     const r=await fetch(u,{cache:"no-store"});
     const ct=(r.headers.get("Content-Type")||"").toLowerCase();
@@ -290,24 +336,26 @@ document.getElementById("btn_dl_csv").onclick=async function(){
       return;
     }
     if(!ct.includes("text/csv")){
-      const t=await r.text();
-      msg.textContent="Reponse inattendue (pas un CSV). Verifiez DATABASE_URL sur Render.";
+      msg.textContent="Reponse inattendue. Reessayez dans une minute.";
       return;
     }
     const blob=await r.blob();
     const n=r.headers.get("X-CSV-Rows");
-    const src=r.headers.get("X-CSV-Source")||"database";
+    const disp=r.headers.get("Content-Disposition")||"";
+    let fn="irrigation_log.csv";
+    const m=/filename="([^"]+)"/.exec(disp);
+    if(m) fn=m[1];
     const a=document.createElement("a");
     a.href=URL.createObjectURL(blob);
-    a.download="irrigation_log.csv";
+    a.download=fn;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(a.href);
     const rows=n!==null&&n!==""?parseInt(n,10):null;
-    msg.textContent="Telechargement lance (source: "+src+(Number.isFinite(rows)?", "+rows+" lignes de donnees":"")+", en-tete inclus).";
-  }catch(e){
-    msg.textContent="Echec reseau : "+(e&&e.message?e.message:String(e));
+    msg.textContent="Telechargement : "+fn+(Number.isFinite(rows)?" ("+rows+" lignes)":"");
+  }catch(err){
+    msg.textContent="Echec reseau : "+(err&&err.message?err.message:String(err));
   }
 };
 bindManualFormGuard();

@@ -17,13 +17,21 @@ import ssl
 import sys
 import threading
 import time
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 from flask import Flask, Response, jsonify, request
 import paho.mqtt.client as mqtt
 
-from db_mysql import MySQLStore, TelemetryData, extract_telemetry_from_mqtt, telemetry_to_csv_row
+from db_mysql import (
+    VALID_CROP_NAMES,
+    MySQLStore,
+    TelemetryData,
+    extract_telemetry_from_mqtt,
+    is_row_complete_for_db,
+    telemetry_to_csv_row,
+)
 from db_postgres import PostgresStore, postgres_store_from_env
 
 CSV_HEADER = [
@@ -39,6 +47,8 @@ CSV_HEADER = [
     "irrigate",
     "irrigation_litres",
 ]
+
+CSV_EXPORT_HEADER = ["recorded_at", *CSV_HEADER]
 
 app = Flask(__name__)
 
@@ -180,16 +190,21 @@ def _append_csv_row(path: Path, row: TelemetryData) -> None:
         csv.writer(f).writerow(line)
 
 
-def _csv_response_from_rows(rows: list[list[Any]]) -> Response:
+def _csv_response_from_rows(
+    rows: list[list[Any]],
+    *,
+    header: list[str] | None = None,
+    filename: str = "irrigation_log.csv",
+) -> Response:
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(CSV_HEADER)
+    w.writerow(header or CSV_HEADER)
     for line in rows:
         w.writerow(line)
     return Response(
         buf.getvalue(),
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=irrigation_log.csv"},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -266,6 +281,9 @@ def _on_mqtt_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage
         payload = merged
 
     row = extract_telemetry_from_mqtt(payload)
+
+    if not is_row_complete_for_db(row):
+        return
 
     if _pg_store is not None:
         try:
@@ -490,15 +508,56 @@ def _get_pg_store() -> PostgresStore | None:
     return _pg_store
 
 
+def _parse_export_date(raw: str | None) -> date | None:
+    if not raw or not str(raw).strip():
+        return None
+    try:
+        return datetime.strptime(str(raw).strip()[:10], "%Y-%m-%d").date()
+    except ValueError:
+        raise ValueError(f"Date invalide : {raw!r} (attendu AAAA-MM-JJ)")
+
+
+def _csv_export_filename(crop: str | None, date_from: date | None, date_to: date | None) -> str:
+    if not crop and not date_from and not date_to:
+        return "irrigation_log.csv"
+    parts = ["irrigation_log"]
+    if crop:
+        parts.append(crop.lower())
+    if date_from:
+        parts.append(f"from-{date_from.isoformat()}")
+    if date_to:
+        parts.append(f"to-{date_to.isoformat()}")
+    return "_".join(parts) + ".csv"
+
+
 @app.route("/api/irrigation_log.csv", methods=["GET"])
 def api_irrigation_log_csv() -> Any:
     store = _get_pg_store()
     if store is not None:
         try:
-            rows = store.fetch_all_csv_rows(CSV_HEADER)
-            resp = _csv_response_from_rows(rows)
+            crop = request.args.get("crop", "").strip()
+            if crop and crop not in VALID_CROP_NAMES:
+                return jsonify({"error": f"Culture invalide : {crop!r}"}), 400
+            try:
+                date_from = _parse_export_date(request.args.get("from"))
+                date_to = _parse_export_date(request.args.get("to"))
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            if date_from and date_to and date_from > date_to:
+                return jsonify({"error": "La date de debut doit etre <= date de fin"}), 400
+
+            rows = store.fetch_csv_rows_filtered(
+                CSV_EXPORT_HEADER,
+                crop_name=crop or None,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            resp = _csv_response_from_rows(rows, header=CSV_EXPORT_HEADER)
             resp.headers["X-CSV-Source"] = "database"
             resp.headers["X-CSV-Rows"] = str(len(rows))
+            resp.headers["Content-Disposition"] = (
+                f'attachment; filename="{_csv_export_filename(crop or None, date_from, date_to)}"'
+            )
             return resp
         except Exception as e:
             return jsonify({"error": f"Lecture base: {e}"}), 500

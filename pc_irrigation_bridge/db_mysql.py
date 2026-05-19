@@ -4,9 +4,12 @@ Stockage MySQL des lignes de telemetrie (memes champs que le CSV du pont).
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from typing import Any
+
+VALID_CROP_NAMES = frozenset({"Maize", "Rice", "Tomato", "Wheat"})
 
 import pymysql
 
@@ -95,6 +98,37 @@ def extract_telemetry_from_mqtt(payload: dict[str, Any]) -> TelemetryData:
     )
 
 
+def _finite_num(v: float | None) -> bool:
+    return v is not None and isinstance(v, (int, float)) and math.isfinite(float(v))
+
+
+def is_row_complete_for_db(t: TelemetryData) -> bool:
+    """True si toutes les colonnes metier du journal sont renseignees (saisie + MLP actifs)."""
+    if not t.manual_ok:
+        return False
+    if not (t.crop_name or "").strip() or t.crop_name not in VALID_CROP_NAMES:
+        return False
+    if not (t.soil_type or "").strip():
+        return False
+    if t.crop_age_days is None or t.crop_age_days < 1 or t.crop_age_days > 120:
+        return False
+    if t.p_fraction is None or not _finite_num(t.p_fraction):
+        return False
+    if not _finite_num(t.temperature_c):
+        return False
+    if not _finite_num(t.humidity_pct):
+        return False
+    if not _finite_num(t.rainfall_mm):
+        return False
+    if not _finite_num(t.wind_speed_m_s):
+        return False
+    if not _finite_num(t.soil_moisture_pct):
+        return False
+    if not _finite_num(t.irrigation_litres):
+        return False
+    return True
+
+
 def telemetry_to_csv_row(t: TelemetryData, csv_header: list[str]) -> list[Any]:
     """Liste de valeurs alignee sur csv_header (ordre du pont)."""
     age_cell = t.crop_age_days if t.crop_age_days is not None else ""
@@ -112,6 +146,15 @@ def telemetry_to_csv_row(t: TelemetryData, csv_header: list[str]) -> list[Any]:
         "irrigation_litres": _fmt2(t.irrigation_litres),
     }
     return [row_map[c] for c in csv_header]
+
+
+def telemetry_to_export_csv_row(recorded_at_iso: str, t: TelemetryData, csv_header: list[str]) -> list[Any]:
+    """Ligne export (option recorded_at en premiere colonne)."""
+    data_cols = [c for c in csv_header if c != "recorded_at"]
+    cells = telemetry_to_csv_row(t, data_cols)
+    if "recorded_at" in csv_header:
+        return [recorded_at_iso] + cells
+    return cells
 
 
 class MySQLStore:

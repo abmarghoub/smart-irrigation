@@ -6,13 +6,14 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote, unquote, urlparse, urlunparse
 
 import psycopg2
 import psycopg2.extras
 
-from db_mysql import TelemetryData, telemetry_to_csv_row
+from db_mysql import TelemetryData, telemetry_to_export_csv_row
 
 _IDENTIFIER_SAFE = re.compile(r"^[A-Za-z0-9_]{1,64}$")
 
@@ -185,35 +186,82 @@ class PostgresStore:
                 cur.execute(sql, vals)
             conn.commit()
 
-    def fetch_all_csv_rows(self, csv_header: list[str]) -> list[list[Any]]:
+    @staticmethod
+    def _sql_complete_rows_only() -> str:
+        return """
+          AND crop_name <> ''
+          AND soil_type <> ''
+          AND crop_age_days IS NOT NULL AND crop_age_days BETWEEN 1 AND 120
+          AND p_fraction IS NOT NULL
+          AND temperature_c IS NOT NULL
+          AND humidity_pct IS NOT NULL
+          AND rainfall_mm IS NOT NULL
+          AND wind_speed_m_s IS NOT NULL
+          AND soil_moisture_pct IS NOT NULL
+          AND irrigation_litres IS NOT NULL
+        """
+
+    def _row_from_record(self, r: dict[str, Any]) -> TelemetryData:
+        return TelemetryData(
+            crop_name=r["crop_name"] or "",
+            soil_type=r["soil_type"] or "",
+            crop_age_days=r["crop_age_days"],
+            manual_ok=True,
+            temperature_c=float(r["temperature_c"]),
+            humidity_pct=float(r["humidity_pct"]),
+            rainfall_mm=float(r["rainfall_mm"]),
+            wind_speed_m_s=float(r["wind_speed_m_s"]),
+            soil_moisture_pct=float(r["soil_moisture_pct"]),
+            p_fraction=float(r["p_fraction"]),
+            irrigate=int(r["irrigate"] or 0),
+            irrigation_litres=float(r["irrigation_litres"]),
+        )
+
+    def fetch_csv_rows_filtered(
+        self,
+        csv_header: list[str],
+        *,
+        crop_name: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> list[list[Any]]:
         sql = f"""
-        SELECT crop_name, soil_type, crop_age_days, temperature_c, humidity_pct, rainfall_mm,
+        SELECT recorded_at, crop_name, soil_type, crop_age_days, temperature_c, humidity_pct, rainfall_mm,
                wind_speed_m_s, soil_moisture_pct, p_fraction, irrigate, irrigation_litres
         FROM {self._table}
         WHERE device_id = %s
-        ORDER BY recorded_at ASC, id ASC
+        {self._sql_complete_rows_only()}
         """
+        params: list[Any] = [self._device_id]
+        if crop_name:
+            sql += " AND crop_name = %s"
+            params.append(crop_name)
+        if date_from is not None:
+            sql += " AND recorded_at >= %s"
+            params.append(datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc))
+        if date_to is not None:
+            sql += " AND recorded_at < %s"
+            params.append(
+                datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+            )
+        sql += " ORDER BY recorded_at ASC, id ASC"
+
         out: list[list[Any]] = []
         with self._connect() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(sql, (self._device_id,))
+                cur.execute(sql, tuple(params))
                 for r in cur.fetchall():
-                    t = TelemetryData(
-                        crop_name=r["crop_name"] or "",
-                        soil_type=r["soil_type"] or "",
-                        crop_age_days=r["crop_age_days"],
-                        manual_ok=bool(r["p_fraction"] is not None and r["crop_name"]),
-                        temperature_c=float(r["temperature_c"] or 0),
-                        humidity_pct=float(r["humidity_pct"] or 0),
-                        rainfall_mm=float(r["rainfall_mm"] or 0),
-                        wind_speed_m_s=float(r["wind_speed_m_s"] or 0),
-                        soil_moisture_pct=float(r["soil_moisture_pct"] or 0),
-                        p_fraction=float(r["p_fraction"]) if r["p_fraction"] is not None else None,
-                        irrigate=int(r["irrigate"] or 0),
-                        irrigation_litres=float(r["irrigation_litres"] or 0),
-                    )
-                    out.append(telemetry_to_csv_row(t, csv_header))
+                    ts = r["recorded_at"]
+                    if hasattr(ts, "isoformat"):
+                        recorded_iso = ts.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    else:
+                        recorded_iso = str(ts)
+                    t = self._row_from_record(r)
+                    out.append(telemetry_to_export_csv_row(recorded_iso, t, csv_header))
         return out
+
+    def fetch_all_csv_rows(self, csv_header: list[str]) -> list[list[Any]]:
+        return self.fetch_csv_rows_filtered(csv_header)
 
 
 def postgres_store_from_env() -> PostgresStore | None:
