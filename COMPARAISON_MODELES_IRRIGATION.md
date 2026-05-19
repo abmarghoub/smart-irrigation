@@ -512,6 +512,73 @@ Cette section décrit l’**évolution majeure** du déploiement : alléger la c
 
 - Le serveur Flask embarqué est le **mode développement** ; pour un produit multi-utilisateurs, prévoir **HTTPS**, **auth**, broker **TLS**, topics par **tenant**, et déploiement **WSGI** + MySQL managé (voir discussions produit hors de ce document).
 
+#### 6.10.11 Déploiement cloud — HiveMQ + Render + Supabase (état au 2026)
+
+Cette section **enregistre** l’évolution du flux **ESP32 → Internet** vers un **tableau de bord distant** et une **base PostgreSQL** (gratuits : HiveMQ Cloud, Render free tier, Supabase).
+
+##### Architecture cible
+
+```
+ESP32 (WiFi Internet, MQTT TLS 8883)
+  → HiveMQ Cloud (broker)
+  → Render (pont Python Flask + gunicorn : pc_irrigation_bridge/)
+  → Supabase PostgreSQL (DATABASE_URL, pooler recommandé IPv4)
+```
+
+- **Accès** : URL Render (HTTPS) pour le dashboard et les API ; CSV et santé hors réseau WiFi de la station.
+- **Secrets** : `weather_secrets.h` (local, non versionné) pour WiFi + HiveMQ sur l’ESP ; variables d’environnement Render pour le même broker / mot de passe / `DATABASE_URL`.
+
+##### Fichiers principaux (dépôt)
+
+| Fichier / dossier | Rôle |
+|-------------------|------|
+| `esp32_weather_station/mqtt_irrigation.cpp` + `.h` | Client **PubSubClient** + **WiFiClientSecure** ; TLS 8883 ; publish JSON télémétrie ; subscribe commandes (`manual`, `relay`, legacy) ; buffer JSON et logs diagnostic ; `client_id` unique ; heartbeat / publish après connexion. |
+| `esp32_weather_station/weather_secrets.example.h` | Modèle sans secrets (broker HiveMQ, topics `station01`, port 8883). |
+| `esp32_weather_station/weather_secrets.h` | **Gitignored** — mots de passe réels. |
+| `esp32_weather_station/esp32_weather_station.ino` | Boucle capteurs, MLP, `mqtt_irrigation_publish_state` ; commande série **`M`** (test publish MQTT). |
+| `pc_irrigation_bridge/bridge.py` | Flask : `/`, `/api/state`, `/api/health`, `/api/manual`, `/api/irrigation_log.csv` ; bootstrap **sans lire `sys.argv`** sous gunicorn ; MQTT **loop_forever** ; insertion Postgres conditionnelle ; commandes **QoS 1** + PUBACK. |
+| `pc_irrigation_bridge/db_postgres.py` | `DATABASE_URL` (pooler Supabase sur Render), `fetch_csv_rows_filtered`, lignes complètes SQL. |
+| `pc_irrigation_bridge/db_mysql.py` | `is_row_complete_for_db`, `VALID_CROP_NAMES`, export CSV. |
+| `pc_irrigation_bridge/dashboard.html` | Saisie **Appliquer** ; garde **formDirty** ; export CSV filtré ; UI épurée. |
+| `pc_irrigation_bridge/DEPLOY_CLOUD.md` | Guide déploiement. |
+| `render.yaml` | Blueprint Render. |
+| `.gitignore` | Exclut secrets et CSV locaux. |
+
+##### Topics MQTT (alignement Render / ESP)
+
+| Topic | Sens |
+|-------|------|
+| `irrigation/station01/telemetry` | ESP → broker → pont (JSON état). |
+| `irrigation/station01/command/manual` | Pont → ESP (âge, culture, sol). |
+| `irrigation/station01/command/relay` | Pont → ESP (`cmd: "manual"` + champs) — voie préférée. |
+| `irrigation/command/manual` | Legacy. |
+
+##### Insertion base — lignes complètes uniquement
+
+- **`is_row_complete_for_db`** : saisie confirmée, culture valide, sol, âge 1–120, `p_fraction`, mesures numériques finies.
+- Lignes incomplètes : pas d’insert Postgres ; **`/api/state`** reste à jour via MQTT.
+
+##### Export CSV
+
+- Colonne **`recorded_at`** (UTC) en tête d’export.
+- Filtres optionnels : `crop` ; `from` seul (→ aujourd’hui) ; `to` seul (→ depuis le début) ; `from`+`to` ; culture seule.
+- Dashboard : formulaire export sans texte technique sur les lignes complètes.
+
+##### Correctifs majeurs (dépannage)
+
+| Problème | Correction |
+|----------|------------|
+| gunicorn + argparse | `bootstrap([])` à l’import. |
+| Postgres IPv6 sur Render | URI pooler Supabase (6543). |
+| `mqtt_rx_count: 0` | ACL Subscribe telemetry ; ESP publish ; topics identiques. |
+| Commande dashboard sans effet ESP | QoS 1 ; Publish sur `command/relay` ; `loop_forever` pont. |
+| Formulaire saisie réinitialisé | `formDirty` + pas de sync pendant édition. |
+| JSON MQTT tronqué | Buffer 1536+ ; JSON compact. |
+
+##### API santé
+
+- **`GET /api/health`** : `mqtt`, `postgres`, `last_mqtt_rx_at`, `mqtt_rx_count`, `mqtt_loopback_ok`.
+
 ---
 
-*Document généré pour décrire l’état du projet et la stratégie multi-modèles ; les métriques du §2 proviennent d’une exécution de référence sur le CSV du dépôt avec les mêmes features que les notebooks. La section §6 décrit le déploiement ESP32 (SmallNN principal, premier arbre RF secondaire), PlatformIO, Arduino IDE, capteurs §6.6, météo zone §6.7, mini station météo §6.8 (`esp32_weather_station/` — Open-Meteo par défaut, capteurs locaux optionnels). Les **évolutions détaillées** du croquis irrigation, du mode web + journal LittleFS historiques et du **pont PC MQTT / CSV / MySQL** (**§6.10.10**) sont regroupées au **§6.10**.*
+*Document généré pour décrire l’état du projet et la stratégie multi-modèles ; les métriques du §2 proviennent d’une exécution de référence sur le CSV du dépôt avec les mêmes features que les notebooks. La section §6 décrit le déploiement ESP32 (SmallNN principal, premier arbre RF secondaire), PlatformIO, Arduino IDE, capteurs §6.6, météo zone §6.7, mini station météo §6.8 (`esp32_weather_station/` — Open-Meteo par défaut, capteurs locaux optionnels). Les **évolutions détaillées** du croquis irrigation, du mode web + journal LittleFS historiques, du **pont PC MQTT / CSV / MySQL** (**§6.10.10**) et du **déploiement cloud** (**§6.10.11**) sont regroupées au **§6.10**.*
